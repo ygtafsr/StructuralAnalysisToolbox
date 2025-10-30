@@ -29,3 +29,6 @@
 
 ## MPLIB: Sets the default material library read and write paths.
 
+def import_material():
+    '''Imports a single material to the active mapdl session from the material database'''
+    pass
