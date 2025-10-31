@@ -1,0 +1,17 @@
+LICENSE
+README.md
+pyproject.toml
+src/structuralanalysistoolbox/__init__.py
+src/structuralanalysistoolbox/model.py
+src/structuralanalysistoolbox.egg-info/PKG-INFO
+src/structuralanalysistoolbox.egg-info/SOURCES.txt
+src/structuralanalysistoolbox.egg-info/dependency_links.txt
+src/structuralanalysistoolbox.egg-info/requires.txt
+src/structuralanalysistoolbox.egg-info/top_level.txt
+src/structuralanalysistoolbox/Interactions/__init__.py
+src/structuralanalysistoolbox/Interactions/Constraints/MPC184_Rigid.py
+src/structuralanalysistoolbox/Interactions/Constraints/__init__.py
+src/structuralanalysistoolbox/Interactions/Contacts/__init__.py
+src/structuralanalysistoolbox/Interactions/Couplings/__init__.py
+src/structuralanalysistoolbox/Materials/__init__.py
+src/structuralanalysistoolbox/Materials/material.py
