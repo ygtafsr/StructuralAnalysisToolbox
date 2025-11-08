@@ -25,5 +25,3 @@ def create_RBE2(mapdl_instance : Mapdl, dependent_nodes : str, independent_node 
         mapdl_instance.e(node, _independent_node)
 
     mapdl_instance.allsel()
-
-    

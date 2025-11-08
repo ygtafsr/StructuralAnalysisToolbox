@@ -1,0 +1,262 @@
+{
+  "_schema_version": "1.0",
+  "_units": {
+    "density": "kg/m^3",
+    "elastic_modulus": "Pa",
+    "shear_modulus": "Pa",
+    "poisson_ratio": "-",
+    "yield_strength_0p2": "Pa",
+    "ultimate_tensile_strength": "Pa",
+    "thermal_conductivity": "W/m/K",
+    "cte": "1/K",
+    "specific_heat": "J/kg/K",
+    "hardness_HB": "-",
+    "fatigue_strength_coefficient_sigma_f": "Pa",
+    "fatigue_ductility_coefficient_eps_f": "-",
+    "cyclic_strength_coefficient_K_prime": "Pa",
+    "cyclic_strain_hardening_exponent_n_prime": "-",
+    "S_N": "cycles vs Pa"
+  },
+  "materials": {
+    "My Steel": {
+      "category": "Steel",
+      "remarks": "It is a good steel",
+      "source": "My Mind",
+      "last update": "Today",
+      "material models": {
+        "PHYSICAL": {
+          "model name": "Physical",
+          "density": [
+            [
+              25,
+              7850
+            ],
+            [
+              50,
+              8000
+            ]
+          ]
+        },
+        "ELASTICITY": {
+          "model name": "IsotropicElasticity",
+          "elastic_modulus": [
+            [
+              25,
+              210000
+            ],
+            [
+              50,
+              212000
+            ]
+          ],
+          "poisson_ratio": [
+            [
+              25,
+              0.3
+            ],
+            [
+              25,
+              0.3
+            ]
+          ]
+        },
+        "PLASTICITY": {
+          "model name": "MultilinearIsotropicHardening",
+          "data_table": [
+            25,
+            [
+              [
+                0.0,
+                327.9
+              ],
+              [
+                0.013831,
+                364.54
+              ],
+              [
+                0.031667,
+                395.8
+              ],
+              [
+                0.064935,
+                447.98
+              ],
+              [
+                0.099022,
+                497.51
+              ],
+              [
+                0.135995,
+                552.08
+              ],
+              [
+                0.169308,
+                608.27
+              ],
+              [
+                0.20041,
+                653.33
+              ],
+              [
+                0.23384,
+                706.71
+              ],
+              [
+                0.267461,
+                751.2
+              ],
+              [
+                0.305631,
+                800.0
+              ],
+              [
+                0.336388,
+                836.01
+              ],
+              [
+                0.366757,
+                880.35
+              ],
+              [
+                0.390539,
+                905.83
+              ],
+              [
+                0.413212,
+                928.49
+              ],
+              [
+                0.434872,
+                948.18
+              ],
+              [
+                0.453592,
+                957.41
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    "My Steel-2": {
+      "category": "Steel",
+      "remarks": "It is a good steel",
+      "source": "My Mind",
+      "last update": "Today",
+      "material models": {
+        "PHYSICAL": {
+          "model name": "Physical",
+          "density": [
+            [
+              25,
+              7850
+            ],
+            [
+              50,
+              8000
+            ]
+          ]
+        },
+        "ELASTICITY": {
+          "model name": "IsotropicElasticity",
+          "elastic_modulus": [
+            [
+              25,
+              210000
+            ],
+            [
+              50,
+              212000
+            ]
+          ],
+          "poisson_ratio": [
+            [
+              25,
+              0.3
+            ],
+            [
+              25,
+              0.3
+            ]
+          ]
+        },
+        "PLASTICITY": {
+          "model name": "MultilinearIsotropicHardening",
+          "data_table": [
+            25,
+            [
+              [
+                0.0,
+                327.9
+              ],
+              [
+                0.013831,
+                364.54
+              ],
+              [
+                0.031667,
+                395.8
+              ],
+              [
+                0.064935,
+                447.98
+              ],
+              [
+                0.099022,
+                497.51
+              ],
+              [
+                0.135995,
+                552.08
+              ],
+              [
+                0.169308,
+                608.27
+              ],
+              [
+                0.20041,
+                653.33
+              ],
+              [
+                0.23384,
+                706.71
+              ],
+              [
+                0.267461,
+                751.2
+              ],
+              [
+                0.305631,
+                800.0
+              ],
+              [
+                0.336388,
+                836.01
+              ],
+              [
+                0.366757,
+                880.35
+              ],
+              [
+                0.390539,
+                905.83
+              ],
+              [
+                0.413212,
+                928.49
+              ],
+              [
+                0.434872,
+                948.18
+              ],
+              [
+                0.453592,
+                957.41
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  }
+}

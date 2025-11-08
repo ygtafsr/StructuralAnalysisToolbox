@@ -19,6 +19,7 @@ dependencies = [
     "ansys-math-core==0.2.4",
     "ansys-platform-instancemanagement==1.1.2",
     "ansys-tools-path==0.7.3",
+    "ansys-tools-visualization-interface==0.12.1",
     "appdirs==1.4.4",
     "certifi==2025.10.5",
     "charset-normalizer==3.4.4",
@@ -55,6 +56,7 @@ dependencies = [
     "urllib3==2.5.0",
     "vtk==9.4.2",
     "zipp==3.23.0",
+    "ipywidgets==8.1.7"
 ]
 
 [tool.setuptools.packages.find]

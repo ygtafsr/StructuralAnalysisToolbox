@@ -1,0 +1,9 @@
+
+1) json serializer/deserializer for material library
+2) material properties ansys implementation
+3) Exception handling for material module
+
+
+NOTEs::
+
+* Temperature dependent material properties based analysis are not considered for now.
