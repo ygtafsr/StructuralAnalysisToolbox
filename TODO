@@ -1,9 +1,12 @@
 
-1) json serializer/deserializer for material library
+TODOs:
+1) json serializer/deserializer for material library (OK)
 2) material properties ansys implementation
 3) Exception handling for material module
+4) matlib module database create, read, update, delete functions **
+5) material module plotting and table outputs for material properties
+6) material module material calculations (True-Eng etc.)
 
 
 NOTEs::
-
-* Temperature dependent material properties based analysis are not considered for now.
+* Temperature dependent material properties with body Loads (BFE??)

@@ -1,9 +1,12 @@
 
 import ansys.mapdl.core as core
 from ansys.mapdl.core import launch_mapdl
-from materials import material 
+from .materials import material 
+from .materials.material import Material
+from .solver.mapdl import _material
+"""from materials import material 
 from materials.material import Material
-from solver.mapdl import _material
+from solver.mapdl import _material"""
 
 
 from pathlib import Path
@@ -137,7 +140,7 @@ def show_mesh(mapdl : core.Mapdl):
 ## TEST
 ####
 
-def main():
+"""def main():
     
     model = Model(name="test_model")
     model.add_material(mat="My Steel")
@@ -149,7 +152,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main()"""
 
 
 

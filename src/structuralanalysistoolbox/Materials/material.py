@@ -1,10 +1,8 @@
 
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import numpy as np
-
-from .matlib import MatDatabase
-library = MatDatabase()
+from . import matlib
 
 class MaterialModelCategory(Enum):
     PHYSICAL = 1
@@ -13,7 +11,7 @@ class MaterialModelCategory(Enum):
     HYPER_ELASTIC = 4
     STRENGTH = 5
     FATIGUE = 6
-
+    
 class DataAlreadyDefined(Exception):
 
     def __init_(self):
@@ -23,46 +21,52 @@ class DataAlreadyDefined(Exception):
 class Physical:     # --> material model
 
     model_category = MaterialModelCategory.PHYSICAL
-    density : list[list] = None # material_data (-> material label)
+    density : float | list = None # -> material label
+
+    """def __post_init__(self):
+        if isinstance(self.density, int):
+            self.density = float(self.density)"""
 
 @dataclass
 class IsotropicElasticity:  
 
     model_category = MaterialModelCategory.ELASTICITY
-    elastic_modulus : list[list] = None # [[temp, E],]  
-    poisson_ratio : list[list]   = None # [[temp, nu],] 
+    elastic_modulus : float | list = None  
+    poisson_ratio : float | list = None  
 
 @dataclass
 class MultilinearIsotropicHardening:
 
     model_category = MaterialModelCategory.PLASTICITY
-    data_table : list[list]  = None # [temp, [strain , stress]]
+    temperature : float | list = 25
+    data_table : list = None 
 
 @dataclass
 class BilinearIsotropicHardening:
 
     model_category = MaterialModelCategory.PLASTICITY
-    yield_strength : list[list] = None
-    tangent_modulus : list[list] = None
+    temperature : float = 25
+    yield_strength : float = None
+    tangent_modulus : float = None
 
 @dataclass
 class Strength:
 
     model_category = MaterialModelCategory.STRENGTH
-    tensile_yield_strength : float = 0.0
-    tensile_ultimate_strength : float = 0.0
+    tensile_yield_strength : float = None
+    tensile_ultimate_strength : float = None
 
 @dataclass
 class StrainLife:
 
     model_category : MaterialModelCategory.FATIGUE
-    strength_coefficient : float = 0.0
-    strength_exponent : float = 0.0
-    ductility_coefficient : float = 0.0
-    ductility_exponent : float = 0.0
+    strength_coefficient : float = None
+    strength_exponent : float = None
+    ductility_coefficient : float = None
+    ductility_exponent : float = None
 
-    cyclic_strength_coefficient : float = 0.0
-    cyclic_strength_hardening_exponent : float = 0.0
+    cyclic_strength_coefficient : float = None
+    cyclic_strength_hardening_exponent : float = None
 
 class Material:
 
@@ -83,6 +87,12 @@ class Material:
             self.material_models[data.model_category.name] = data
         else: raise DataAlreadyDefined()
 
+    def save(self):
+        if matlib.exist(self.name):
+            matlib._update(self)
+        else:
+            matlib._create(self) 
+
     def list(self):
         pass
 
@@ -98,15 +108,11 @@ class Material:
                     return data
         return None
 
-    def _generate_commands(self, solver='MAPDL'):
-        '''Generate MAPDL material model commands'''
-        pass
-
 def load(mat_name : str) -> Material:
 
-    if library._exist(mat_name):
+    if matlib.exist(mat_name):
         new_mat = Material(name=mat_name)
-        database_mat = library._read(mat_name)
+        database_mat = matlib._read(mat_name)
         """Converts database object to a material object"""
         for key, value in database_mat.items():
             if key == "category": new_mat.category = value
@@ -127,4 +133,17 @@ def load(mat_name : str) -> Material:
 def import_csv_data(path : str):
     data_table = np.loadtxt(fname=path, delimiter=',')
     return data_table.tolist()
+
+
+#######################################
+## Calculations for Material Properties
+#######################################
+def convert_true_to_eng():
+    pass
+
+#######################################
+## Material Data Plotting
+#######################################
+def plot(data: str = "True Stress_True Strain"):
+    pass
 
