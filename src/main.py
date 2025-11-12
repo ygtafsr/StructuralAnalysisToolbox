@@ -24,7 +24,8 @@ def _add_material():
  
 def main():
 
-    #_add_material()
+    model = stbox.Model(name="my-model")
+    model.add_mesh(mesh_file_path=r'C:\Users\yigit\StructuralAnalysisToolbox\src\mesh_rod.cdb')
     pass
 
 if __name__ == "__main__":

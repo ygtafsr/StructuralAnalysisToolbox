@@ -1,30 +1,33 @@
 
 import ansys.mapdl.core as core
 from ansys.mapdl.core import launch_mapdl
+from dataclasses import dataclass
+from pathlib import Path
+from enum import Enum
+import time
+
 from .materials import material 
 from .materials.material import Material
-from .solver.mapdl import _material
-"""from materials import material 
-from materials.material import Material
-from solver.mapdl import _material"""
+from .constraints import constraint
 
-
-from pathlib import Path
-import time
-from dataclasses import dataclass
-from enum import Enum
 
 class ComponentType(Enum):
     NODE = 1
     ELEMENT = 2
 
-'''@dataclass
+@dataclass
 class Component:
+    name : str
+    type : str
+    items : list
 
-    type : ComponentType
-    element_type : str
-    material : MaterialModel
-    #section'''
+@dataclass
+class Nset(Component):
+    type = "Node"
+
+@dataclass
+class Elset(Component):
+    type = "Element"
 
 
 class Model:
@@ -42,12 +45,12 @@ class Model:
                                     # {'components' : {'comp_name' : [comp_obj, comp_id],}}
                                     # ...
         # Mesh
-        # Components
+        # Sets
         # Sections?
         # Element Types
         # Materials
         # Contacts
-        # Kinematic Constraints & Couplings
+        # Constraints
         # Analysis & Solver Parameters
         # Load Steps
         # Loads & BCs
@@ -75,15 +78,33 @@ class Model:
         return self.mapdl
     
     def stop(self):
+
+        # TODO : move it to the solver module
         self.mapdl.exit()
 
     def add_mesh(self, mesh_file_path : str):
         
+        # TODO : move it to the solver module
         self.mapdl.input(mesh_file_path)
-        # TODO : create component objects after import
 
-    def components(self):
-        pass
+        # create component objects after import
+        for name, type in self.mapdl.components.items():
+            if type == "ELEM":
+                comp = Elset(name, type, self.mapdl.components[name].items)
+                self.add_set(comp)
+            elif type == "NODE":
+                comp = Nset(name, type, self.mapdl.components[name].items)
+                self.add_set(comp)
+
+    def add_set(self, comp : Component):
+        
+        if "sets" in self._model_definitions:
+            id = len(self._model_definitions["sets"]) + 1
+        else: 
+            self._model_definitions["sets"] = {}
+            id = 1
+
+        self._model_definitions["sets"][comp.name] = (comp, id)
 
     def add_material(self, mat : str | Material):
 
@@ -95,10 +116,15 @@ class Model:
 
         if isinstance(mat, str):
             mat = material.load(mat_name=mat)
-            self._model_definitions["materials"][mat.name] = [mat, id]
+            self._model_definitions["materials"][mat.name] = (mat, id)
         elif isinstance(mat, Material):
-            self._model_definitions["materials"][mat.name] = [mat, id]
+            self._model_definitions["materials"][mat.name] = (mat, id)
         else: return
+
+
+    def add_coupling(self, nset : str):
+
+        pass
 
     def add_contact(self, master='', slave=''):
         pass
@@ -115,6 +141,9 @@ class Model:
     def plot(self):
         # plot mesh & BC
         self.mapdl.eplot()
+
+    def get(self):
+        pass
 
     def info(self):
         # report model definitions
@@ -135,25 +164,17 @@ def show_mesh(mapdl : core.Mapdl):
     mapdl.eplot()
 
 
+class Node:
 
-####
-## TEST
-####
+    def __init__(self, model : Model):
 
-"""def main():
+        self.id : int
+        self.dof : int
+        self.mapdl = model.mapdl
+
+    def _create_free_node(self):
+        """finds max node id, creates a new one with the next number."""
     
-    model = Model(name="test_model")
-    model.add_material(mat="My Steel")
-    model.add_material(mat="My Steel-2")
-
-    for mat_data in model._model_definitions["materials"].values():
-        _material(mapdl=model.mapdl, mat=mat_data[0], mat_id=mat_data[1])
-    
-
-
-if __name__ == '__main__':
-    main()"""
-
 
 
 

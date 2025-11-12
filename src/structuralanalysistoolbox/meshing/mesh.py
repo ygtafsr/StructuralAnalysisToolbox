@@ -1,4 +1,5 @@
 
 
 class Mesh:
-    pass
+    
+    x:str
