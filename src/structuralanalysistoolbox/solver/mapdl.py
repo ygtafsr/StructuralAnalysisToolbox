@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+import functools
 import ansys.mapdl.core as core
 import numpy as np
 from enum import Enum
@@ -11,7 +12,14 @@ if TYPE_CHECKING:
     from structuralanalysistoolbox import model
     from structuralanalysistoolbox.constraints import constraint
 
-"""from materials import material"""
+def prep7(func):
+    @functools.wraps(func)
+    def wrapper_prep7(*args, **kwargs):  
+        args[0].prep7()
+        val = func(*args, **kwargs)
+        args[0].finish()
+        return val
+    return wrapper_prep7
 
 
 def _material(mapdl : core.Mapdl, mat : material.Material, mat_id : int) -> None:
@@ -97,42 +105,47 @@ def _get(mapdl : core.Mapdl, set : model.Component, value : Get):
 ## CONSTRAINTS
 ############################
 
-def _coupling_dof(mapdl : core.Mapdl, coupling : constraint.CouplingDOF) -> int:
+@prep7
+def _coupled_dof(mapdl : core.Mapdl, coupling : constraint.CoupledDOF) -> int:
     """Create a dof coupling between nodes and returns primary node number 
     as an integer for coupled set."""
-    mapdl.prep7()
-
-    mapdl.cp(nset=f"{coupling.id}", lab=coupling.dof, node1=coupling.nset.name)
     
-    mapdl.finish()
-    primary_node_id = _get(mapdl, coupling.nset, Get.Min_Node_Number)
-    return primary_node_id
+    if coupling.dof == "ALL":
+        # Using "ALL" directly results new ids for each dof. 
+        # So, this method prefered.
+        mapdl.cp(nset=f"{coupling.id}", lab="UX", node1=coupling.nset.name)
+        mapdl.cp(nset=f"{coupling.id}", lab="UY", node1=coupling.nset.name)
+        mapdl.cp(nset=f"{coupling.id}", lab="UZ", node1=coupling.nset.name)
+        mapdl.cp(nset=f"{coupling.id}", lab="ROTX", node1=coupling.nset.name)
+        mapdl.cp(nset=f"{coupling.id}", lab="ROTY", node1=coupling.nset.name)
+        mapdl.cp(nset=f"{coupling.id}", lab="ROTZ", node1=coupling.nset.name)
+    elif isinstance(coupling.dof, tuple):
+        for dof in coupling.dof:
+            mapdl.cp(nset=f"{coupling.id}", lab=dof, node1=coupling.nset.name)
+    else:
+        mapdl.cp(nset=f"{coupling.id}", lab=coupling.dof, node1=coupling.nset.name)
+    #primary_node_id = _get(mapdl, coupling.nset, Get.Min_Node_Number)
+    #return primary_node_id
 
-def _coupling_interface(mapdl : core.Mapdl, id : int, nset : model.Nset, tolerance : float):
+@prep7
+def _coupled_interface(mapdl : core.Mapdl, coupling : constraint.CoupledInterface):
     pass
 
-                            
-def _create_MPC184_rigid(mapdl : core.Mapdl, dependent_nodes : str, independent_node : str) -> None:
+@prep7                           
+def _MPC184(mapdl : core.Mapdl, mpc: constraint.MPC) -> None:
+
+    mapdl.et(itype=mpc._etype.id,
+             ename=mpc._etype.type.value,
+             kop1=mpc._etype.get_keyop(1),
+             kop2=mpc._etype.get_keyop(2)
+             )
     
-    # Check current processor ???
-    # Check whether components are exist ???
-    
-    mapdl.prep7()
+    mapdl.type(mpc._etype.id)
 
-    # get the components content
-    _dependent_nodes = mapdl.components[dependent_nodes].items
-    _independent_node = mapdl.components[independent_node].items[0]
+    for node in mpc.dependent:
+        mapdl.e(node, mpc.independent)
 
-    ## ????
-    _current_max_type_number = int(mapdl.get('max_type_number','ETYP','','NUM','MAX'))
- 
-    # create the MPC184 elements
-    mapdl.et(_current_max_type_number+1,'MPC184',1,1)
-    mapdl.type(_current_max_type_number+1)
 
-    for node in _dependent_nodes:
-        mapdl.e(node, _independent_node)
 
-    #mapdl.allsel()  
 
-    mapdl.finish()                 
+

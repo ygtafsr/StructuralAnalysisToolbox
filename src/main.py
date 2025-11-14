@@ -26,7 +26,13 @@ def main():
 
     model = stbox.Model(name="my-model")
     model.add_mesh(mesh_file_path=r'C:\Users\yigit\StructuralAnalysisToolbox\src\mesh_rod.cdb')
-    pass
+
+    # NSET for constraint node
+    depen = model._model_definitions["sets"]["NS_LOAD_DEPEN"][0]
+    indepen = model._model_definitions["sets"]["NS_LOAD"][0]
+
+    model.add_MPC(name="MPC-1", type="RigidLink", dependent=depen, independents=indepen)
+    print(model)    
 
 if __name__ == "__main__":
     main()
