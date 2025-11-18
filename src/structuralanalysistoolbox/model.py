@@ -6,9 +6,9 @@ from pathlib import Path
 from enum import Enum
 from typing import Literal
 import time
-import functools
 
 from .meshing import mesh
+from .meshing import element as el
 from .materials import material 
 from .materials.material import Material
 from .constraints import constraint
@@ -35,9 +35,8 @@ class Elset(Component):
     type = "Element"
 
 @dataclass
-class Surface:
+class Surface(Nset):
     pass
-
 
 class Model:
 
@@ -50,10 +49,15 @@ class Model:
         self.work_folder = work_folder
         _creation_time = time.time()
 
+        self.elsets = {}
+        self.nsets = {}
+        self.surfaces = {}
+
         self._element_types = []
+
         self._model_definitions = {} # {'materials' : {'material_name' : [material_obj, mat_id],}}
                                      # {'components' : {'comp_name' : [comp_obj, comp_id],}}
-                                    # ...
+                                     # ...
         # Mesh
         # Element Types !!!
         # Sets
@@ -92,14 +96,23 @@ class Model:
         # TODO : move it to the solver module
         self.mapdl.exit()
 
-    def add_mesh(self, mesh_file_path : str):
-        
-        # TODO : move it to the solver module
-        #self.mapdl.input(mesh_file_path)
-        self.mapdl.cdread(option="DB", fname=mesh_file_path)
+    def import_mesh(self, mesh_file_path : str):
+        """
+        Imports only mesh data from ansys block structured file format. 
 
-        self.mapdl.db.
-        
+        >> Reads:
+            # EBLOCK
+            # NBLOCK
+            # ELEMENT ATTRIBUTES:
+                ET, R, MP, SECTYPE, SECDATA 
+            # COMPONENTS    
+
+        >> Does not read:
+            Loads, BCs, Load Steps, constraints (CP, CE, MPC) etc. 
+        """
+                
+        self.mapdl.input(mesh_file_path)
+        #self.mapdl.cdread(option="DB", fname=mesh_file_path)
 
         # Create "Node/Element sets" after import
         for name, type in self.mapdl.components.items():
@@ -110,9 +123,19 @@ class Model:
                 comp = Nset(name, type, self.mapdl.components[name].items)
                 self.add_set(comp)
 
+        # TODO:
+        # Transform 
         # Create "Element Types" after import
-
+        #   Define "KeyOpts"
         # Create "Real Constants" after import
+    
+    def export_model(self, fileName : str):
+        """Exports file in blocked format"""
+        self.mapdl.allsel()
+        self.mapdl.cdwrite(option="ALL", fileName=fileName, fmat="BLOCKED")
+
+    def add_element_type(self):
+        pass
 
 
     def add_set(self, comp : Component):
@@ -149,7 +172,7 @@ class Model:
         return
 
 
-    def add_dof_coupling(self, name : str, nset : str, dof : str):
+    def add_coupling(self, name : str, nset : str, dof : str):
         """
         Adds a new dof coupling to the model. 
         dof: "UX/UY/UZ/ROTX/ROTY/ROTZ" or

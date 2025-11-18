@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from structuralanalysistoolbox.meshing.mesh import ElementType, Etype
+from structuralanalysistoolbox.meshing.mesh import ElementType
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ class MPC:
         method = 0 if self.method == None else MPCmethods[self.method]
 
         self._etype = ElementType(id=self.etype_id, 
-                                  type=Etype.MPC184, 
+                                  type=ETypes.MPC184, 
                                   keyopt=[
                                          (1,MPCtypes[self.type]),
                                          (2,method),

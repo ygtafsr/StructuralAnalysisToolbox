@@ -7,6 +7,13 @@ TODOs:
 5) material module plotting and table outputs for material properties
 6) material module material calculations (True-Eng etc.)
 
+7) ElementType Object and Implementations for 3D, 2D, 1D, 0D element types
+8) Mesh_Importing (For Block Structured Ansys Files) with:
+            ET
+            NBLOCK
+            EBLCOK
+            CMBLOCK
+
 
 NOTEs::
 * Temperature dependent material properties with body Loads (BFE??)

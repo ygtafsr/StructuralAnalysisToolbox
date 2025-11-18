@@ -1,6 +1,15 @@
 
 import structuralanalysistoolbox as stbox
 
+from ansys.mapdl import reader as pymapdl_reader
+from ansys.mapdl.reader import examples
+
+
+def export(file : str):
+
+    arch = pymapdl_reader.Archive(filename=file)
+
+
 def _add_material():
 
     physical = stbox.material.Physical(density=[[25, 8000], [50, 9000]])
@@ -24,15 +33,9 @@ def _add_material():
  
 def main():
 
-    model = stbox.Model(name="my-model")
-    model.add_mesh(mesh_file_path=r'C:\Users\yigit\StructuralAnalysisToolbox\src\mesh_rod.cdb')
-
-    # NSET for constraint node
-    depen = model._model_definitions["sets"]["NS_LOAD_DEPEN"][0]
-    indepen = model._model_definitions["sets"]["NS_LOAD"][0]
-
-    model.add_MPC(name="MPC-1", type="RigidLink", dependent=depen, independents=indepen)
-    print(model)    
+    
+    hex_beam = pymapdl_reader.Archive(examples.hexarchivefile)
+    print(hex_beam)
 
 if __name__ == "__main__":
     main()
