@@ -73,6 +73,7 @@ class Material:
     def __init__(self, name, category = '', remarks = '', source = '', last_update = ''):
         
         # material labels
+        self.midx : int = 0
         self.name : str  = name   # MATERIAL NAME MUST BE UNIQUE!
         self.category : str  = category
         self.remarks : str  = remarks

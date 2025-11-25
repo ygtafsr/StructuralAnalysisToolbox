@@ -2,8 +2,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal
+from abc import abstractmethod
 
-from structuralanalysistoolbox.meshing.mesh import ElementType
+#from structuralanalysistoolbox.mapdl.mesh import ElementType
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -99,65 +101,221 @@ class Rigid:
 ########################
 ## MPC184
 ########################
-"""
-To define various contact assemblies and kinematic constraints, use the internal multipoint constraint
-(MPC) approach (KEYOPT(2) = 2) with certain bonded and no-separation contact definitions (KEYOPT(12)
-= 4, 5, or 6).
-Supported contact elements are CONTA172, CONTA174, CONTA175, and CONTA177.
-
-MAIN COMMANDS:
-CERIG
-RBE3
-
-"""
-
-
-MPCtypes = { "RigidLink" : 0,
-            "RigidBeam" : 1,
-            "Slider" : 3,
-            "Revolute" : 6,
-            "Universal" : 7,
-            "Slot" : 8,
-            "Point" : 9,
-            "Translational" : 10,
-            "Cylindrical" : 11,
-            "Planar" : 12,
-            "Weld" : 13,
-            "Orient" : 14,
-            "Spherical" : 15,
-            "General" : 16,
-            "Screw" : 17}
-
-MPCmethods = {"DirectElemination" : 0,
-             "LagrangeMultiplication" : 1,
-             "SurfaceBased" : 2}
-               
 
 @dataclass
-class MPC:
+class MPC184:
 
-    name : str
-    id : int  # MPC object id
-    type : str
-    dependent : model.Nset
-    independent : model.Nset
-    etype_id : int  # MPC184 Element Type id
-    method : None | str = None # Default method
-    axis : None | int = None
-    stress_stiffening: None | int = None
-    _etype : ElementType = None
+    midx : int = 0   # model index
+    dependent : model.Nset = None
+    independent : model.Nset = None  
+    etype = None
     
-    def __post_init__(self):
+#######################
+### MPC184 CONSTRAINTS
+#######################
 
-        method = 0 if self.method == None else MPCmethods[self.method]
+@dataclass
+class MPCRigidLink(MPC184):
+    
+    behaviour = 0
+    method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Direct Elimination"
+    contribution : Literal["Include", "Exlude"] = "Include"
+    
+@dataclass
+class MPCRigidBeam(MPC184):
+    
+    behaviour = 1
+    method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Direct Elimination"
+    contribution : Literal["Include", "Exlude"] = "Include"
+    
+@dataclass
+class MPCSlider(MPC184):
+    
+    behaviour = 3
+    method : Literal["Lagrange Multiplier", "Penalty-based"] = "Lagrange Multiplier"
+    
+##################
+### MPC184 JOINTS
+##################
+"""
+    MPC184:
+    https://ansyshelp.ansys.com/public/account/secured?returnurl=//Views/Secured/corp/v242/en/ans_elem/Hlp_E_MPC184.html?q=MPC184
 
-        self._etype = ElementType(id=self.etype_id, 
-                                  type=ETypes.MPC184, 
-                                  keyopt=[
-                                         (1,MPCtypes[self.type]),
-                                         (2,method),
-                                         (4,self.axis),
-                                         (5,self.stress_stiffening)])
+    SECTYPE:
+    https://ansyshelp.ansys.com/public/account/secured?returnurl=///Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECTYPE.html
+
+    SECDATA:
+    https://ansyshelp.ansys.com/public/account/secured?returnurl=////Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECDATA.html
+
+    SECJOINT DATA:
+    https://ansyshelp.ansys.com/public/account/secured?returnurl=//Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECJOINT.html
+"""
+@dataclass
+class MPCJoint(MPC184):
+
+    material : str = None                           # Join material option on the TB command
+    penalty_factors : str = None                    # CHECK SECJOINT DATA
+    bc : str = None                                 # DJ or FJ boundary conditions
+    local_cs : model.LocalCoordinateSystem = None   # SECJOINT DATA
+    stop : list = None                              # SECSTOP (Stops or limits)
+    lock : list = None                              # SECLOCK
+    method : Literal["Lagrange Multiplier", "Penalty-Based"] = "Lagrange Multiplier"
+    sectiontype = "JOINT"
+
+@dataclass
+class RevoluteXJoint(MPCJoint):
+
+    angle : float =  None    # SECDATA
+    friction : list  = None # SECJOINT DATA  :: friction: (Outer radius, Inner radius, Effective length)
+    configuration = "x-axis"
+    behaviour = 6
+    section_sub_type = "REVO"
+
+@dataclass
+class RevoluteZJoint(MPCJoint):
+
+    angle : float = None    # SECDATA
+    friction : list = None  # SECJOINT DATA :: friction: (Outer radius, Inner radius, Effective length)
+    configuration = "z-axis"
+    behaviour = 6
+    section_sub_type = "REVO"
+
+@dataclass
+class UniversalJoint(MPCJoint):
+
+    angle_1 : float = None # SECDATA
+    angle_2 : float = None # SECDATA
+    behaviour = 7
+    section_sub_type = "UNIV"
+
+@dataclass
+class SlotJoint(MPCJoint):
+
+    length : float = None   # SECDATA
+    friction : float = None # SECJOINT DATA :: friction: 
+    behaviour = 8
+    section_sub_type = "SLOT"
+
+@dataclass
+class PointJoint(MPCJoint):
+
+    lenght_1 : float = None # SECDATA
+    length_2 : float = None # SECDATA
+    behaviour = 9
+    section_sub_type = "PINP"
+
+@dataclass
+class TranslationalJoint(MPCJoint):
+
+    length : float = None # SECDATA
+    friction : list = None # SECJOINT DATA :: friction: (Effective length, Effective radius)
+    behaviour = 10
+    section_sub_type = "PRIS"
+
+@dataclass
+class CylindricalXJoint(MPCJoint):
+
+    length : float = None # SECDATA
+    angle : float = None # SECDATA
+    configuration = "x-axis"
+    behaviour = 11
+    section_sub_type = "CYLI"
+
+@dataclass
+class CylindricalZJoint(MPCJoint):
+
+    length_3 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    configuration = "z-axis"
+    behaviour = 11
+    section_sub_type = "CYLI"
+
+@dataclass
+class PlanarXJoint(MPCJoint):
+
+    lenght_2 : float = None # SECDATA
+    length_3 : float = None # SECDATA
+    angle_1 : float = None # SECDATA
+    configuration = "x-axis"
+    behaviour = 12
+    section_sub_type = "PLAN"
+
+@dataclass
+class PlanarYJoint(MPCJoint):
+    lenght_1 : float = None # SECDATA
+    length_2 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    configuration = "x-axis"
+    behaviour = 12
+    section_sub_type = "PLAN"
+
+@dataclass
+class WeldJoint(MPCJoint):
+    behaviour = 13
+    section_sub_type = "WELD"
+
+@dataclass
+class OrientJoint(MPCJoint):
+    behaviour = 14
+    section_sub_type = "ORIE"
+
+@dataclass
+class SphericalJoint(MPCJoint):
+    angle_1 : float = None # SECDATA
+    angle_2 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    friction : int = None  # SECJOINT DATA :: friction: (Effective radius)
+    behaviour = 15
+    section_sub_type = "SPHE"
+
+@dataclass
+class GeneralJoint(MPCJoint):
+    lenght_1 : float = None # SECDATA
+    lenght_2 : float = None # SECDATA
+    lenght_3 : float = None # SECDATA
+    angle_1 : float = None # SECDATA
+    angle_2 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    configuration : Literal["displacement and rotation",
+                            "only displacement"] = None
+    relative_dof : Literal["UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"] = None # SECJOINT DATA
+    behaviour = 16
+    section_sub_type = "GENE"
+
+@dataclass
+class ScrewJoint(MPCJoint):
+    lenght_3 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    #The pitch is defined as the ratio of relative axial displacement (length units) to relative rotation (in radians).
+    pitch : int = None # SECJOINT DATA
+    behaviour = 17
+    section_sub_type = "SCRE"
+
+@dataclass
+class SpotWeldJoint(MPCJoint):
+    location : float = None # spring-damper location # SECJOINT DATA
+    behaviour = 18
+    section_sub_type = "SPWE"
+
+@dataclass
+class GenbJoint(MPCJoint):
+    lenght_1 : float = None # SECDATA
+    lenght_2 : float = None # SECDATA
+    lenght_3 : float = None # SECDATA
+    angle_1 : float = None # SECDATA
+    angle_2 : float = None # SECDATA
+    angle_3 : float = None # SECDATA
+    configuration : Literal["displacement and rotation",
+                            "only displacement"] = None
+    relative_dof : Literal["UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"] = None # SECJOINT DATA
+    behaviour = 19
+    section_sub_type = "GENB"
+
+
+#######################
+## Surface Based MPC
+#######################
+
 
 @dataclass
 class MPCRigidSurface:

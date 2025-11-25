@@ -1,13 +1,8 @@
 
 import structuralanalysistoolbox as stbox
-
+from pathlib import Path
 from ansys.mapdl import reader as pymapdl_reader
 from ansys.mapdl.reader import examples
-
-
-def export(file : str):
-
-    arch = pymapdl_reader.Archive(filename=file)
 
 
 def _add_material():
@@ -33,9 +28,13 @@ def _add_material():
  
 def main():
 
+    model = stbox.Model(name="my-model", interactive=False)
+    model.import_mesh(r'src\rod.cdb')
+        
+    model.add_MPC_Rigid(dependent="NS_LOAD_DEPEN", independent="NS_LOAD")
+    model.info()
     
-    hex_beam = pymapdl_reader.Archive(examples.hexarchivefile)
-    print(hex_beam)
+    model._execute_commands()
 
 if __name__ == "__main__":
     main()

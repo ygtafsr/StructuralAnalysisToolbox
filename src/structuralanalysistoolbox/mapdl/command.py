@@ -4,11 +4,13 @@ import functools
 import ansys.mapdl.core as core
 import numpy as np
 from enum import Enum
-from dataclasses import asdict
+
+from structuralanalysistoolbox.materials import material
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from structuralanalysistoolbox.materials import material
+    from structuralanalysistoolbox.mapdl.mesh import Mesh
+
     from structuralanalysistoolbox import model
     from structuralanalysistoolbox.constraints import constraint
 
@@ -21,55 +23,51 @@ def prep7(func):
         return val
     return wrapper_prep7
 
-
-def _material(mapdl : core.Mapdl, mat : material.Material, mat_id : int) -> None:
+@prep7
+def _material(mapdl : core.Mapdl, mat : material.Material) -> None:
     """Runs mapdl material definition commands"""
-
-    mapdl.prep7()
     
     for model in mat.material_models.values():
-
         if isinstance(model, material.Physical):
             # Density
             if isinstance(model.density, (float, int)):
-                mapdl.mp(lab="DENS", mat=f"{mat_id}", c0=f"{model.density}")
+                mapdl.mp(lab="DENS", mat=f"{mat.midx}", c0=f"{model.density}")
             else:  
                 label = "density"
-                mapdl.load_table(name=f"{label}_{mat_id}", array=np.array(model.density), var1="TEMP")
-                mapdl.mp(lab="DENS", mat=f"{mat_id}", c0=f"%{label}_{mat_id}%")
+                mapdl.load_table(name=f"{label}_{mat.midx}", array=np.array(model.density), var1="TEMP")
+                mapdl.mp(lab="DENS", mat=f"{mat.midx}", c0=f"%{label}_{mat.midx}%")
         elif isinstance(model, material.IsotropicElasticity):
             # Elastic Modulus
             if isinstance(model.elastic_modulus, (float, int)):
-                mapdl.mp(lab="EX", mat=f"{mat_id}", c0=f"{model.elastic_modulus}")
+                mapdl.mp(lab="EX", mat=f"{mat.midx}", c0=f"{model.elastic_modulus}")
             else:
                 label = "elastic_modulus"
-                mapdl.load_table(name=f"{label}_{mat_id}", array=np.array(model.elastic_modulus), var1="TEMP")
-                mapdl.mp(lab="EX", mat=f"{mat_id}", c0=f"%{label}_{mat_id}%")
+                mapdl.load_table(name=f"{label}_{mat.midx}", array=np.array(model.elastic_modulus), var1="TEMP")
+                mapdl.mp(lab="EX", mat=f"{mat.midx}", c0=f"%{label}_{mat.midx}%")
             # Poisson's Ratio
             if isinstance(model.poisson_ratio, (float, int)):
-                mapdl.mp(lab="NUXY", mat=f"{mat_id}", c0=f"{model.poisson_ratio}")
+                mapdl.mp(lab="NUXY", mat=f"{mat.midx}", c0=f"{model.poisson_ratio}")
             else:
                 label = "poissons_ratio"
-                mapdl.load_table(name=f"{label}_{mat_id}", array=np.array(model.poisson_ratio), var1="TEMP")
-                mapdl.mp(lab="NUXY", mat=f"{mat_id}", c0=f"%{label}_{mat_id}%")
+                mapdl.load_table(name=f"{label}_{mat.midx}", array=np.array(model.poisson_ratio), var1="TEMP")
+                mapdl.mp(lab="NUXY", mat=f"{mat.midx}", c0=f"%{label}_{mat.midx}%")
         elif isinstance(model, material.MultilinearIsotropicHardening):
             # Multilinear Isotropic Hardening
             if model.temperature == None:
                 data_count = len(model.data_table)
-                mapdl.tb(lab="PLASTIC", mat=f"{mat_id}", ntemp="1", 
+                mapdl.tb(lab="PLASTIC", mat=f"{mat.midx}", ntemp="1", 
                                                             npts=f"{data_count}")
                 mapdl.tbtemp(temp="")
                 for data in model.data_table:
                     mapdl.tbpt(oper="DEFI", x1=f"{data[0]}", x2=f"{data[1]}")
             elif isinstance(model.temperature, (float, int)):
                 data_count = len(model.data_table)
-                mapdl.tb(lab="PLASTIC", mat=f"{mat_id}", ntemp="1", 
+                mapdl.tb(lab="PLASTIC", mat=f"{mat.midx}", ntemp="1", 
                                                             npts=f"{data_count}")
                 mapdl.tbtemp(temp=f"{model.temperature}")
                 for data in model.data_table:
                     mapdl.tbpt(oper="DEFI", x1=f"{data[0]}", x2=f"{data[1]}")
 
-    mapdl.finish()
 
 ############################
 ## GET 
@@ -85,7 +83,7 @@ class Get(Enum):
     Min_Node_Number = 2
 
 
-def _get(mapdl : core.Mapdl, set : model.Component, value : Get):
+def _get(mapdl : core.Mapdl, set : model.set, value : Get):
     # *GET, Par, Entity, Item1, IT1NUM, Item2, ITNUM2
     # mapdl.get(par="", entity="", item1="", it1num="", ...) -> (float, str)
 
@@ -132,18 +130,38 @@ def _coupled_interface(mapdl : core.Mapdl, coupling : constraint.CoupledInterfac
     pass
 
 @prep7                           
-def _MPC184(mapdl : core.Mapdl, mpc: constraint.MPC) -> None:
+def _MPC184(mapdl : core.Mapdl, mpc) -> None:
 
-    mapdl.et(itype=mpc._etype.id,
-             ename=mpc._etype.type.value,
-             kop1=mpc._etype.get_keyop(1),
-             kop2=mpc._etype.get_keyop(2)
-             )
+    if mpc.method == "Direct Elimination":
+        method = 0
+    elif mpc.method == "Lagrange Multiplier":
+        method = 1
+    elif mpc.method == "Penalty-based":
+        method = 2
+
+    mapdl.et(itype=mpc.etype.midx,
+             ename="184",
+             kop1=mpc.behaviour,
+             kop2=method)
     
-    mapdl.type(mpc._etype.id)
+    mapdl.type(mpc.etype.midx)
 
     for node in mpc.dependent:
-        mapdl.e(node, mpc.independent)
+        mapdl.e(node, mpc.independent[0])
+
+#@prep7
+def _create_joint(mapdl : core.Mapdl, model_item_obj : constraint.MPCJoint):
+    
+    print(model_item_obj)
+
+
+@prep7
+def _execute_mesh_data(mapdl : core.Mapdl, model_item_obj : Mesh):
+    """Reads the mesh model into mapdl session."""
+    arv_file_path = model_item_obj.archieve.pathlib_filename
+    if  arv_file_path.exists():
+        mapdl.cdread(option="DB", fname=arv_file_path.absolute())
+
 
 
 

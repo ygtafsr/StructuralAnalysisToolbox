@@ -1,104 +1,114 @@
 
+from __future__ import annotations
 import ansys.mapdl.core as core
 from ansys.mapdl.core import launch_mapdl
 from dataclasses import dataclass
-from pathlib import Path
-from enum import Enum
 from typing import Literal
+from pathlib import Path
+import numpy as np
 import time
 
-from .meshing import mesh
-from .meshing import element as el
-from .materials import material 
-from .materials.material import Material
-from .constraints import constraint
-from .constraints.constraint import (MPCtypes, MPCmethods)
-from .solver import mapdl
+from structuralanalysistoolbox.mapdl import files
+from structuralanalysistoolbox.materials import material 
+from structuralanalysistoolbox.materials.material import Material
+from structuralanalysistoolbox.constraints import constraint
+from structuralanalysistoolbox.mapdl import command
+from structuralanalysistoolbox.mapdl import element
 
-
-class ComponentType(Enum):
-    NODE = 1
-    ELEMENT = 2
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from structuralanalysistoolbox.mapdl.mesh import Mesh
+    
 
 @dataclass
-class Component:
+class set:
     name : str
-    type : str
-    items : list
+    items : np.array
 
 @dataclass
-class Nset(Component):
-    type = "Node"
+class Nset(set):
+    name: str
+    items : np.array
+    midx = 0
 
 @dataclass
-class Elset(Component):
-    type = "Element"
+class Elset(set):
+    name : str
+    items : np.array
+    midx = 0
+    properties = None
+
+    def __str__(self):
+        return (
+            f"Id: {self.midx}\n" 
+            f"Elements: {self.items}")
 
 @dataclass
 class Surface(Nset):
-    pass
+    name : str
+    items : np.array
+
+@dataclass
+class LocalCoordinateSystem:
+    midx : int
 
 class Model:
 
-    def __init__(self, solver='MAPDL', name = '', cpus = 4, interactive = True, work_folder = ''):
+    def __init__(self, name = '', cpus = 4, interactive = True, work_folder = '', solver : Literal["MAPDL"] = "MAPDL"):
         
-        self.solver = solver
+        self.solver_name = solver
         self.modelname = name
         self.cpus = cpus
         self.interactive = interactive
         self.work_folder = work_folder
-        _creation_time = time.time()
 
-        self.elsets = {}
-        self.nsets = {}
-        self.surfaces = {}
+        self._command_map = []
 
-        self._element_types = []
-
-        self._model_definitions = {} # {'materials' : {'material_name' : [material_obj, mat_id],}}
-                                     # {'components' : {'comp_name' : [comp_obj, comp_id],}}
-                                     # ...
-        # Mesh
-        # Element Types !!!
-        # Sets
-        # Sections?
-        # Materials
-        # Contacts
-        # Constraints
-        # Analysis & Solver Parameters
-        # Load Steps
-        # Loads & BCs
-        # Outputs
-        # Restart Parameters
+        self._model_definitions = {"Element Types" : {},
+                                   "Materials" : {},
+                                   "Sets" : {"Node Sets" : {}, 
+                                             "Element Sets": {}},
+                                   "Surfaces" : {},
+                                   "Sections" : {},
+                                   "Constraints" : {"Linear Couplings" : {},
+                                                    "Constraint Equations" : {},
+                                                    "MPC" : {},
+                                                    "Joints" : {}},
+                                   "Contacts" : {},
+                                   "Load Steps" : {"Parameters" : {},
+                                                   "Boundary Conditions" : {},
+                                                   "Loads" : {},
+                                                   "Outputs" : {},
+                                                   "Restart" : {}}
+                                   } 
 
         if work_folder == '':
             _current_path = Path.cwd()
-            self.working_directory = _current_path / f'{name}_{_creation_time}'
+            self.creation_time = time.time()
+            self.working_directory = _current_path / f'{name}_{self.creation_time}'
             self.working_directory.mkdir()
         
         if interactive:
             self._start()
 
-    def _start(self):
+    def nset(self, name : str):
+        return self._model_definitions["Sets"]["Node Sets"][name]
 
-        self.mapdl = launch_mapdl(run_location=self.working_directory,
-                                  jobname=self.modelname,
-                                  nproc=self.cpus,
-                                  override=True)
-        
-        # First, reset the MAPDL database.
-        self.mapdl.clear()
+    def elset(self, name : str):
+        return self._model_definitions["Sets"]["Element Sets"][name]
 
-        return self.mapdl
-    
-    def stop(self):
+    def surface(self, name : str):
+        return self._model_definitions["Sets"]["Surfaces"][name]
 
-        # TODO : move it to the solver module
-        self.mapdl.exit()
-
-    def import_mesh(self, mesh_file_path : str):
+    def import_mesh(self, file : str):
         """
-        Imports only mesh data from ansys block structured file format. 
+        # Reads NBlock, EBlock, and Element Attributes (ET) from ansys block structured file format.
+        # If there is already an element attribute defined with the same id in the model, 
+          it is overriden.
+        # In case of interactive modeling, the imported mesh file is not executed by solver. It is
+          converted to PyVista Unstructuredmesh format. So, at the pre-processing time, this mesh
+          format re-converted to mapdl mesh format again. To do that, an mapdl command mapping was added
+          to the end of this method.
 
         >> Reads:
             # EBLOCK
@@ -110,67 +120,73 @@ class Model:
         >> Does not read:
             Loads, BCs, Load Steps, constraints (CP, CE, MPC) etc. 
         """
-                
-        self.mapdl.input(mesh_file_path)
-        #self.mapdl.cdread(option="DB", fname=mesh_file_path)
+        self.mesh : Mesh = files._ansys_mesh(file)
 
-        # Create "Node/Element sets" after import
-        for name, type in self.mapdl.components.items():
-            if type == "ELEM":
-                comp = Elset(name, type, self.mapdl.components[name].items)
-                self.add_set(comp)
-            elif type == "NODE":
-                comp = Nset(name, type, self.mapdl.components[name].items)
-                self.add_set(comp)
+        for name, nlist in self.mesh.nset_dict.items():
+            set = Nset(name, nlist)
+            self.add_set(set)
+
+        for name, elist in self.mesh.elset_dict.items():
+            set = Elset(name, elist)
+            self.add_set(set)
 
         # TODO:
-        # Transform 
+        et_list = self.mesh.element_types() # [(etype, etype_idx) ...]
+        for etype in et_list:
+            self.add_element_type(etype)
+
         # Create "Element Types" after import
         #   Define "KeyOpts"
-        # Create "Real Constants" after import
-    
+        # Create "Real Constants" after import,
+
+        # Map solver command:
+        self._add_command("_execute_mesh_data", self.mesh)
+     
+    def add_element_type(self, etype):
+        """Add element type object to the model"""
+
+        if etype.midx != 0:
+            self._model_definitions["Element Types"][etype.name] = etype
+        else:
+            etype.midx = self._find_max_id(self._model_definitions["Element Types"]) + 1
+            self._model_definitions["Element Types"][etype.name] = etype
+        
     def export_model(self, fileName : str):
         """Exports file in blocked format"""
         self.mapdl.allsel()
         self.mapdl.cdwrite(option="ALL", fileName=fileName, fmat="BLOCKED")
 
-    def add_element_type(self):
-        pass
-
-
-    def add_set(self, comp : Component):
-        
-        if "sets" in self._model_definitions:
-            id = self._find_max_id("sets") + 1
-        else: 
-            self._model_definitions["sets"] = {}
-            id = 1
-
-        self._model_definitions["sets"][comp.name] = (comp, id)
-
+    def add_set(self, set : set):
+        """Add Nset, Elset or Surface object to the model"""
+        if isinstance(set, Nset):
+            set.midx = self._find_max_id(self._model_definitions["Sets"]["Node Sets"]) + 1
+            self._model_definitions["Sets"]["Node Sets"][set.name] = set
+        elif isinstance(set, Elset):
+            set.midx = self._find_max_id(self._model_definitions["Sets"]["Element Sets"]) + 1
+            self._model_definitions["Sets"]["Element Sets"][set.name] = set
+        elif isinstance(set, Surface):
+            set.midx = self._find_max_id(self._model_definitions["Surfaces"]) + 1
+            self._model_definitions["Surfaces"][set.name] = set
+            
     def add_material(self, mat : str | Material):
-
-        if "materials" in self._model_definitions:
-            id = self._find_max_id("materials") + 1
-        else: 
-            self._model_definitions["materials"] = {}
-            id = 1
 
         if isinstance(mat, str):
             mat = material.load(mat_name=mat)
-            self._model_definitions["materials"][mat.name] = (mat, id)
+            mat.midx = self._find_max_id(self._model_definitions["Materials"]) + 1
+            self._model_definitions["Materials"][mat.name] = mat
         elif isinstance(mat, Material):
-            self._model_definitions["materials"][mat.name] = (mat, id)
+            mat.midx = self._find_max_id(self._model_definitions["Materials"]) + 1
+            self._model_definitions["Materials"][mat.name] = mat
         else: return
 
-    
+        self._add_command("_material", mat)
+  
     def merge_nodes(self, nset : str):
         """
         Merges coincident nodes for nset
         Merge those nodes together via NUMMRG.
         """
         return
-
 
     def add_coupling(self, name : str, nset : str, dof : str):
         """
@@ -197,57 +213,40 @@ class Model:
 
         return min_node_num
     
-    def add_MPC(self, 
-                name: str,
-                type: Literal["RigidLink",
-                              "RigidBeam",
-                              "Slider",
-                              "Revolute",
-                              "Universal",
-                              "Slot",
-                              "Point",
-                              "Translational",
-                              "Cylindrical",
-                              "Planar",
-                              "Weld",
-                              "Orient",
-                              "Spherical",
-                              "General",
-                              "Screw"], 
-                independents: Nset,
-                dependent: Nset,
-                method: None | Literal["DirectElemination",
-                                       "LagrangeMultiplication",
-                                       "SurfaceBased"] = None):                
+    def add_MPC_Rigid(self, dependent : str | Nset, independent : str | Nset,
+                    mpc: constraint.MPCRigidLink | constraint.MPCRigidBeam = None):                
         
-        # Find MPC Model Item ID
-        if "Multi-Point-Constraints" in self._model_definitions:
-            id = self._find_max_id("Multi-Point-Constraints") + 1
-        else: 
-            self._model_definitions["Multi-Point-Constraints"] = {}
-            id = 1
+        if isinstance(dependent, str):
+            dependent = self.nset(dependent)
+        if isinstance(independent, str):
+            independent = self.nset(independent)
 
-        # Find max type id
-        max_type_no = max((_type[1] for _type in self._element_types), default=0)
-        
-        mpc = constraint.MPC(name=name,
-                             id=id, # MPC id
-                             etype_id=max_type_no+1, # MPC184 Element id
-                             type=type, 
-                             method=method, 
-                             independent=independents, 
-                             dependent=dependent)
-        
-        # Add MPC184 "Element Type" definition to the model list.
-        self._element_types.append((mpc._etype, max_type_no+1))
+        mpc_obj = None
+        if mpc == None or mpc == constraint.MPCRigidLink:
+            rigid_link = constraint.MPCRigidLink(dependent=dependent.items, independent=independent.items)
+            rigid_link.midx = self._find_max_id(self._model_definitions["Constraints"]["MPC"]) + 1
+            mpc_obj = self._model_definitions["Constraints"]["MPC"][f"MPC-{rigid_link.midx}"] = rigid_link
+            
+        elif mpc == constraint.MPCRigidBeam:
+            mpc = constraint.MPCRigidBeam(dependent=dependent.items, independent=independent.items)
+            mpc.midx = self._find_max_id(self._model_definitions["Constraints"]["MPC"]) + 1
+            mpc_obj = self._model_definitions["Constraints"]["MPC"][f"MPC-{mpc.midx}"] = mpc
+            
+        else: return
 
-        # Add MPC Object as Model Item
-        self._model_definitions["Multi-Point-Constraints"][name] = (mpc, id)
+        # Create a new MPC184 Element and Element Type ID
+        # We need this to distinguish MPC object id and MPC Element Type id
+        mpc_obj.etype = type_mpc = element.EType(name="MPC184")
+        self.add_element_type(type_mpc)
 
-        # Run with mapdl
-        mapdl._MPC184(self.mapdl, mpc)
-        
+        # Map solver command
+        self._add_command("_MPC184", mpc_obj)
 
+    def add_joint(self, joint : constraint.MPCJoint):
+
+        # Map solver command
+        self._add_command("_create_joint", joint)
+    
     def add_symmetry(self):
         # TODO: symmetric / periodic
         pass   
@@ -278,60 +277,104 @@ class Model:
         return None
 
     def plot(self):
-        # plot mesh & BC
-        self.mapdl.eplot()
+        # plot mesh 
+        if self.mesh:
+            self.mesh.grid.plot(show_edges=True)
 
-    def _get_item_object(self, group : str, item : str):
+    def _get_item_object(self, path : tuple[str]):
         """Returns object for any model item"""
-        try:
-            obj = self._model_definitions[group][item][0]
-        except KeyError:
-            raise KeyError(f"Item '{group}-{item}' does not exist")
-        return obj
+        
+        node = self._model_definitions
+        for key in path:
+            if not isinstance(node, dict) or key not in node:
+                return None
+            node = node[key]
+        return node
 
-    def info(self, group : str,  item : str) -> str:
-        """Returns detailed information string for model items."""
-        pass
+    def _find_max_id(self, group : dict) -> int:
+        """
+        Returns max id of an item in a sub-group
+        gets a dict such as (group_name[sub-group-1][sub-group-2]..)
+        """
+        max_id = 0
+        if len(group.items()) > 0:
+            for item in group.values():
+                if item.midx > max_id: max_id = item.midx
+        return max_id
 
-    def _find_max_id(self, group_name : str) -> int:
-        """Returns max id number in a group"""
-        if len(self._model_definitions[group_name]):
-            max_id = max(v[1] for v in self._model_definitions[group_name].values())
-            return max_id
-        else:
-            return 0
+    def _find_item_object(self, tree, target_key):
+        "depth-first search to find the key"
+        for key, value in tree.items():
+            if key == target_key:
+                return value
             
+            if isinstance(value, dict):
+                result = self._find_item_object(value, target_key)
+                if result is not None:
+                    return result
+        return None
 
-    def __str__(self):
-        # List model items as a tree structure
-        lines = []
-        lines.append(f"  {'Model':22}{'ID'}")
-        lines.append("-" * 40)
+    def info(self, item : None | str = None) -> str:
+        """Returns detailed information string for model item object."""
+        if item == None:
+            # List model items as a tree structure
+            self._print_tree(self._model_definitions, indent=" ")
+        else:
+            obj = self._find_item_object(self._model_definitions, item)
+            print(obj.__str__())
+        
+    def _print_tree(self, tree, indent=""):
+        if not isinstance(tree, dict):
+            return
 
-        for group_name, group in self._model_definitions.items():
-            lines.append(f"• {group_name}")
-            for item_name, item in group.items():
-                lines.append(f"    {item_name:20} {item[1]}")
+        last_key = list(tree.keys())[-1] if tree else None
 
-        return "\n".join(lines)
+        for key in tree:
+            is_last = (key == last_key)
+            prefix = "└── " if is_last else "├── "
+            print(indent + prefix + key)
+
+            next_indent = indent + ("    " if is_last else "│   ")
+            if isinstance(tree[key], dict):
+                self._print_tree(tree[key], next_indent)
+
+    def _add_command(self, func_name : str, model_item_object):
+        """
+        adds command to << self._command_map >> list to be executed at the pre-processing time.
+        func_name is corresponding mapdl commands function in the mapdl.py
+        model_item_object is any kind of object that has information to convey to 
+        mapdl commands function.
+        """
+
+        if self.solver_name == "MAPDL":
+            solver_func = getattr(command, func_name) # Module must be pre-loaded!
+        self._command_map.append((solver_func, model_item_object))
 
     def _execute_commands(self):
-        pass
+
+        if self.solver_name == "MAPDL":
+            self.mapdl = self._start()
+
+        for command in self._command_map:
+            command[0](self.mapdl, command[1])
 
     def solve(self):
         pass
-
-    """def solver(self, func):
-        @functools.wraps(func)
-        def wrapper_solver(*args, **kwargs):  
-            val = func(*args, **kwargs)
-            args[0].finish()
-            return val
-        return wrapper_solver"""
-
+  
+    def _start(self):
+        self.mapdl = launch_mapdl(run_location=self.working_directory,
+                                  jobname=self.modelname,
+                                  nproc=self.cpus,
+                                  override=True)
+        
+        # First, reset the MAPDL database.
+        self.mapdl.clear()
+        return self.mapdl
     
-def _create_sets_from_components(mapdl : core.Mapdl):
-    pass
+    def stop(self):
+        # TODO : move it to the solver module
+        self.mapdl.exit()
+
 
 def _get_min_node(nset : Nset) -> int:
     """
@@ -340,13 +383,6 @@ def _get_min_node(nset : Nset) -> int:
     """
     return min(nset.items)
 
-def import_mesh_file(mapdl : core.Mapdl, path):
-
-    mapdl.input(path)
-
-def show_mesh(mapdl : core.Mapdl):
-
-    mapdl.eplot()
 
 
 
