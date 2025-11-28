@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from structuralanalysistoolbox import model
     from structuralanalysistoolbox.constraints import constraint
+    from structuralanalysistoolbox.loading import loadstep
 
 def prep7(func):
     @functools.wraps(func)
@@ -22,6 +23,15 @@ def prep7(func):
         args[0].finish()
         return val
     return wrapper_prep7
+
+def solu(func):
+    @functools.wraps(func)
+    def wrapper_solu(*args, **kwargs):  
+        args[0].slashsolu()()
+        val = func(*args, **kwargs)
+        args[0].finish()
+        return val
+    return wrapper_solu
 
 @prep7
 def _material(mapdl : core.Mapdl, mat : material.Material) -> None:
@@ -161,6 +171,206 @@ def _execute_mesh_data(mapdl : core.Mapdl, model_item_obj : Mesh):
     arv_file_path = model_item_obj.archieve.pathlib_filename
     if  arv_file_path.exists():
         mapdl.cdread(option="DB", fname=arv_file_path.absolute())
+
+
+@solu
+def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
+
+    mapdl.allsel() # !!!!
+
+    # Solver Controls 
+    # Solver Type
+    if load_step.solver_controls.solver_type == "DIRECT":
+        mapdl.eqslv(lab="SPARSE")
+    elif load_step.solver_controls.solver_type == "ITERATIVE":
+        mapdl.eqslv(lab="PCG")
+    else: return # Raise "InvalidParameter" exception
+
+    # Pivot Check
+    mapdl.pivcheck(key=load_step.solver_controls.pivot_check,
+                   prntcntrl=load_step.solver_controls.pivot_check_print)
+    
+    # Large Deflection
+    mapdl.nlgeom(key=load_step.solver_controls.large_deflection)
+
+    # Weak Springs
+    # Inertia Relif
+    # Quasi-Static Analysis
+
+    # Specify the analysis type and restart status
+    if load_step.status == "RESTART":
+        
+        mapdl.antype(antype=load_step.analysis,
+                    status=load_step.status,
+                    ldstep=load_step.step,
+                    substep=load_step.substep,
+                    action=load_step.action)
+    elif load_step.status == "NEW":
+        mapdl.antype(antype=load_step.analysis)
+    else: return # Raise an exception
+
+    # Specify non-linear geometry option
+    mapdl.nlgeom(load_step.nonlinear_geo)
+
+    # Load Step Time
+    mapdl.time(load_step.step_controls.step_end_time)
+
+    # Time Stepping
+    mapdl.autots(load_step.step_controls.auto_time_stepping)
+    if load_step.step_controls.auto_time_stepping == "ON": # AUTO TIME STEPPING
+        if load_step.step_controls.define_by == "Time":
+            if load_step.step_controls.carry_over_time_steps == "ON":
+                mapdl.deltim(dtmin=load_step.step_controls.minimum_time_step,
+                            dtmax=load_step.step_controls.maximum_time_step,
+                            carry=load_step.step_controls.carry_over_time_steps)
+            elif load_step.step_controls.carry_over_time_steps == "OFF":
+                mapdl.deltim(dtime=load_step.step_controls.initial_time_step,
+                            dtmin=load_step.step_controls.minimum_time_step,
+                            dtmax=load_step.step_controls.maximum_time_step,
+                            carry=load_step.step_controls.carry_over_time_steps)
+            else: return # Raise an exception
+        elif load_step.step_controls.define_by == "Substeps":
+            if load_step.step_controls.carry_over_time_steps == "ON":
+                mapdl.nsubst(nsbmn=load_step.step_controls.minimum_substeps,
+                            nsbmx=load_step.step_controls.maximum_substeps,
+                            carry=load_step.step_controls.carry_over_time_steps)
+            elif load_step.step_controls.carry_over_time_steps == "OFF":
+                mapdl.nsubst(nsbstp=load_step.step_controls.initial_substep,
+                            nsbmn=load_step.step_controls.minimum_substeps,
+                            nsbmx=load_step.step_controls.maximum_substeps,
+                            carry=load_step.step_controls.carry_over_time_steps)
+            else: return # Raise an exception
+        else: return # Raise an exception
+    elif load_step.step_controls.auto_time_stepping == "OFF": # FIXED TIME STEPPING
+            mapdl.deltim(dtime=load_step.step_controls.time_step)
+            mapdl.nsubst(nsbstp=load_step.step_controls.number_of_substeps)
+    else: return # raise an exception
+
+    # Loading Style
+    if load_step.loading_style == "RAMPED":
+        mapdl.kbc(key=0)
+    elif load_step.loading_style == "STEPPED":
+        mapdl.kbc(key=1)
+
+    # Reference Temperature
+    mapdl.tref(tref=load_step.reference_temp)
+
+    ########################
+    ### Nonlinear Controls
+    ########################
+
+    # Newton-Raphson Option
+    if load_step.nonlinear_controls.newton_raphson.creep_limiting:
+        if load_step.nonlinear_controls.newton_raphson.limit:
+            mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option,
+                        option2="CRPL",
+                        optval=load_step.nonlinear_controls.newton_raphson.limit)
+        else:
+            mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option,
+                        option2="CRPL")
+    else:
+        if load_step.nonlinear_controls.newton_raphson.adaptive_descent == True: # Adaptive descent is active
+            mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option,
+                        option2="",
+                        optval="ON")
+        elif load_step.nonlinear_controls.newton_raphson.adaptive_descent == False:# Adaptive descent is deactive
+            mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option,
+                        option2="",
+                        optval="OFF")
+        elif load_step.nonlinear_controls.newton_raphson.adaptive_descent == None: # Default
+            mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option)
+
+
+    # Convergence Controls
+    # Force Convergence
+    if load_step.nonlinear_controls.force_convergence.active:
+        mapdl.cnvtol(lab="F",
+                     value=load_step.nonlinear_controls.force_convergence.value,
+                     toler=load_step.nonlinear_controls.force_convergence.tolerance,
+                     norm=load_step.nonlinear_controls.force_convergence.norm,
+                     minref=load_step.nonlinear_controls.force_convergence.min_reference)
+    # Moment Convergence
+    if load_step.nonlinear_controls.moment_convergence.active:
+        mapdl.cnvtol(lab="M",
+                     value=load_step.nonlinear_controls.moment_convergence.value,
+                     toler=load_step.nonlinear_controls.moment_convergence.tolerance,
+                     norm=load_step.nonlinear_controls.moment_convergence.norm,
+                     minref=load_step.nonlinear_controls.moment_convergence.min_reference)
+    # Volume Convergence
+    # mapdl.cnvtol(lab="DVOL")
+    # Displacement Convergence
+    if load_step.nonlinear_controls.displacement_convergence.active:
+        mapdl.cnvtol(lab="U",
+                     value=load_step.nonlinear_controls.displacement_convergence.value,
+                     toler=load_step.nonlinear_controls.displacement_convergence.tolerance,
+                     norm=load_step.nonlinear_controls.displacement_convergence.norm,
+                     minref=load_step.nonlinear_controls.displacement_convergence.min_reference)
+    # Rotation Convergence
+    if load_step.nonlinear_controls.rotation_convergence.active:
+        mapdl.cnvtol(lab="ROT",
+                     value=load_step.nonlinear_controls.rotation_convergence.value,
+                     toler=load_step.nonlinear_controls.rotation_convergence.tolerance,
+                     norm=load_step.nonlinear_controls.rotation_convergence.norm,
+                     minref=load_step.nonlinear_controls.rotation_convergence.min_reference)
+    # Hydrostatic Pressure
+    # mapdl.cnvtol(lab="HDSP")
+    # Joint Element Constraint Check
+    # mapdl.cnvtol(lab="JOINT")
+    # Volumetric Compability Check
+    # mapdl.cnvtol(lab="COMP")
+
+    # Line Search Option
+    if load_step.nonlinear_controls.line_search:
+        mapdl.lnsrch(key="ON")
+    elif not load_step.nonlinear_controls.line_search:
+        mapdl.lnsrch(key="OFF")
+    elif load_step.nonlinear_controls.line_search == None:
+        mapdl.lnsrch(key="AUTO")
+
+    # Cutback Controls
+
+
+    # Iteration Monitoring
+    mapdl.nldiag(label=load_step.resiudal_monitoring.function,
+                 key=load_step.resiudal_monitoring.characteristics,
+                 maxfile=load_step.resiudal_monitoring.maxfile)
+    
+    mapdl.nldiag(label=load_step.violation_monitoring.function,
+                 key=load_step.violation_monitoring.characteristics,
+                 maxfile=load_step.violation_monitoring.maxfile)
+    
+    mapdl.nldiag(label=load_step.contact_monitoring.function,
+                 key=load_step.contact_monitoring.characteristics,
+                 maxfile=load_step.contact_monitoring.maxfile)
+    
+    # Stabilization
+    if load_step.nonlinear_controls.stabilization.state:
+        if load_step.nonlinear_controls.stabilization.method == "ENERGY":
+            mapdl.stabilize(key=load_step.nonlinear_controls.stabilization.control,
+                            method=load_step.nonlinear_controls.stabilization.method,
+                            value=load_step.nonlinear_controls.stabilization.energy_dissipation_ratio,
+                            substpopt=load_step.nonlinear_controls.stabilization.first_step_activation,
+                            forcelimit=load_step.nonlinear_controls.stabilization.force_limit)
+        elif load_step.nonlinear_controls.stabilization.method == "DAMPING":
+            mapdl.stabilize(key=load_step.nonlinear_controls.stabilization.control,
+                            method=load_step.nonlinear_controls.stabilization.method,
+                            value=load_step.nonlinear_controls.stabilization.damping_factor,
+                            substpopt=load_step.nonlinear_controls.stabilization.first_step_activation,
+                            forcelimit=load_step.nonlinear_controls.stabilization.force_limit)
+    else:
+        mapdl.stabilize(key="OFF")
+
+
+    
+    
+
+
+
+
+            
+
+
+
 
 
 

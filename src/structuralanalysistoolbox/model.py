@@ -12,8 +12,8 @@ from structuralanalysistoolbox.mapdl import files
 from structuralanalysistoolbox.materials import material 
 from structuralanalysistoolbox.materials.material import Material
 from structuralanalysistoolbox.constraints import constraint
-from structuralanalysistoolbox.mapdl import command
-from structuralanalysistoolbox.mapdl import element
+from structuralanalysistoolbox.mapdl import command, element
+from structuralanalysistoolbox.loading import loadstep
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -259,7 +259,8 @@ class Model:
         pass
 
     def add_load_step(self):
-        pass
+        
+        ls = loadstep()
 
     def add_bc(self):
         pass
@@ -374,6 +375,8 @@ class Model:
     def stop(self):
         # TODO : move it to the solver module
         self.mapdl.exit()
+
+
 
 
 def _get_min_node(nset : Nset) -> int:
