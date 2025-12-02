@@ -73,9 +73,8 @@ class Solution:
 
         for ls in self.load_steps:
             for force in ls.forces:
-                # Filter "nodes name" and "direction":
                 if force[0] == nodes and force[1] == direction:
-                    # "Add-New-Delete" Logic:
+                    # Add-New-Delete Logic
                     if force[3] == "NEW":
                         history.append(force[2])
                     elif force[3] == "ADD":
@@ -87,6 +86,8 @@ class Solution:
         
     def get_moment_history(self, nodes : str | int, direction : Literal["RX", "RY", "RZ"]) -> list:
         
+        history = []
+
         history = [0] # for "STEPPED" loading, it must be start from a positive value. Later work!
 
         for ls in self.load_steps:
@@ -347,14 +348,17 @@ class Model:
             raise KeyError(f"Item '{group}-{item}' does not exist")
         return None
 
-    def plot_mesh(self):
+    def plot(self):
+        # plot mesh 
         if self.mesh:
             self.mesh.grid.plot(show_edges=True)
 
-    def plot_load_history(self, nodes : str, load_type : Literal["Force", "Moment", "Displacement"],
+    def plot_load(self, nodes : str, load_type : Literal["Force", "Moment", "Displacement"],
                   direction : Literal["X", "Y", "Z", "RX", "RY", "RZ"]):
+        
         ls_plot = LoadStepPlot(self._solution, nodes=nodes, load_type=load_type, direction=direction)
-        ls_plot.plot()
+        ls_plot.get_axis().plot()
+
 
     def _get_item_object(self, path : tuple[str]):
         """Returns object for any model item"""

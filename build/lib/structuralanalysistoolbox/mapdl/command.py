@@ -451,6 +451,9 @@ def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
             else:
                 mapdl.ddele(node=disp[0], lab=disp[1].replace("R", "ROT"), rkey="OFF")
 
+        
+
+    
 @solu
 def _solve(mapdl: core.Mapdl, solution : model.Solution):  
     for ls in solution.load_steps:

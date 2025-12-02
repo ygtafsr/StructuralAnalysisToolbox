@@ -32,7 +32,15 @@ CREATING MULTIPLE LOAD STEPs
 """
 
 class LoadStep:
-    
+    """
+    Load Steps defined in the "solu" processor.
+    KEY COMMANDS:
+    TIME : Time at the end of a load step.
+    KBC : Ramped/Stepped Loading within a load step.
+    DELTIM : Time step size.
+    NSUBST : Number of Substeps within a load step.
+    AUTOTS : Automatic time stepping
+    """
     def __init__(self, 
                  step_number : int,
                  end_time : int, 
