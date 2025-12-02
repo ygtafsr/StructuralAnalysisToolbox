@@ -1,4 +1,4 @@
-# Structural Analysis Toolbox
+# Structural Analysis Toolbox (stbox)
 
 The main target of the library is creating an easy to follow structural analysis (solid mechanics) modelling workflow and implementation with a solver (mapdl). It provides a high-level implementation of apdl commands through PyMAPDL. 
 
@@ -12,10 +12,6 @@ The main target of the library is creating an easy to follow structural analysis
 ## Workflow
 
 External Mesh Import --> Modelling --> Send to the Solver
-
-## Visualization Example : Load-History Plot
-
-![Load History](images/mesh_sample.png)
 
 ## An Example Project Structure
 ```text
@@ -42,8 +38,17 @@ External Mesh Import --> Modelling --> Send to the Solver
  ├── Contacts
  └── Load Steps
 ```
+## Visualization Example : Load-History Plot
+
+![](images\load-history.png)
 
 ## Installation
 
+..
 
-## Example
+## Usage Examples
+
+![stbox Examples](examples)
+
+
+

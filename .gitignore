@@ -1,3 +1,4 @@
 TODO
-src/rod.cdb
-src/Damper-Updated.cdb
+*.cdb
+*.CDB
+*.inp
