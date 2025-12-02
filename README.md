@@ -46,7 +46,7 @@ External Mesh Import --> Modelling --> Send to the Solver
 
 ..
 
-## Usage Examples
+## Usage
 
 [stbox Examples](examples)
 
