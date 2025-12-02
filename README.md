@@ -1,1 +1,49 @@
-1-) PyAnsys High-Level Structural Analysis Toolbos
+# Structural Analysis Toolbox
+
+The main target of the library is creating an easy to follow structural analysis (solid mechanics) modelling workflow and implementation with a solver (mapdl). It provides a high-level implementation of apdl commands through PyMAPDL. 
+
+## Key Features
+
+* Internal Material Library (CRUD support)
+* Readable Type-Hints
+* Extensive Visualization
+* OOP approach
+
+## Workflow
+
+External Mesh Import --> Modelling --> Send to the Solver
+
+## Visualization Example : Load-History Plot
+
+![Load History](images/mesh_sample.png)
+
+## An Example Project Structure
+```text
+ ├── Element Types
+ │   ├── SOLID185
+ │   └── MPC184
+ ├── Materials
+ │   └── My Steel
+ ├── Sets
+ │   ├── Node Sets
+ │   │   ├── NS_FIX
+ │   │   ├── NS_LOAD
+ │   │   └── NS_LOAD_DEPEN
+ │   └── Element Sets
+ │       └── MESH
+ ├── Surfaces
+ ├── Sections
+ ├── Constraints
+ │   ├── Linear Couplings
+ │   ├── Constraint Equations
+ │   ├── MPC
+ │   │   └── MPC-1
+ │   └── Joints
+ ├── Contacts
+ └── Load Steps
+```
+
+## Installation
+
+
+## Example
