@@ -40,7 +40,7 @@ External Mesh Import --> Modelling --> Send to the Solver
 ```
 ## Visualization Example : Load-History Plot
 
-![](images\load-history.png)
+![](images/load-history.png)
 
 ## Installation
 
@@ -48,7 +48,7 @@ External Mesh Import --> Modelling --> Send to the Solver
 
 ## Usage Examples
 
-![stbox Examples](examples)
+[stbox Examples](examples)
 
 
 
