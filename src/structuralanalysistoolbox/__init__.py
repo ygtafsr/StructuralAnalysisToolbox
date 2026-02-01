@@ -1,13 +1,7 @@
 
-from .model import Model
-from .materials import (material, matlib)
-from .config import settings
-from .mapdl import command
-from .constraints import constraint
-
-__all__ = [Model,
-           settings,
-           command,
-           constraint
-
-]
+from structuralanalysistoolbox import exceptions
+from structuralanalysistoolbox.model import Model
+from structuralanalysistoolbox.materials import (material, matlib)
+from structuralanalysistoolbox.config import settings
+from structuralanalysistoolbox.mapdl import command
+from structuralanalysistoolbox.constraints import constraint

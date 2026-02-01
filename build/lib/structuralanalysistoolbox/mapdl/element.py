@@ -1,99 +1,17 @@
 
-from dataclasses import dataclass, fields
-from enum import Enum
-from typing import Literal, ClassVar
+from dataclasses import dataclass, field, fields
+from abc import ABC, abstractmethod
+from typing import Literal
 
-
-
-##########################
-## ELEMENT TECHNOLOGIES  
-##########################
-
-class Tech185(Enum): 
-    full_integration = 0
-    reduced_integration = 1
-    enhanced_strain = 2
-    simplified_enhanced_strain = 3
-
-class Tech186(Enum): 
-    reduced_integration = 0
-    full_integration = 1
-
-class Tech182(Enum): 
-    full_integration = 0
-    reduced_integration = 1
-    enhanced_strain = 2
-    simplified_enhanced_strain = 3
-
-##########################
-## ELEMENT FORMULATIONS
-##########################
-
-class Form185(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form186(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form187(Enum): 
-    pure_displacement = 0
-    mixed_up_cons_press = 1
-    mixed_up_lin_press = 2
-
-class Form182(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form183(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form285(Enum):
-    mixed_up = 0
-    pure_displacement = 1
-
-###############################
-
-class Behv(Enum):
-    plane_stress = 0
-    axisymmetric = 1
-    plane_strain = 2
-    plane_stress_with_thickness = 3
-    generalized_plane_strain = 5
-    axisymmetric_with_torsion = 6
-    
-class Layer(Enum): 
-    non_layered = 0
-    layered = 1
-
-class Shape(Enum):
-    quad_8 = 0
-    tria_6 = 1
-
-class PML(Enum) : 
-    not_include = 0
-    include = 1
-
-class Steady(Enum):
-    disabled = 0
-    enabled = 1
-
-class SurfOut(Enum):
-    basic = 0
-    extra = 4
 
 @dataclass
-class EType:
-    name : str = ""
-    midx : int = 0
+class EType(ABC):
+    midx : int = 0  # Element type index (Same as in solver)
+    ignore_at_execution = False
 
     def __repr__(self) -> str:
         cls = self.__class__.__name__
         lines = [f"{cls}("]
-        # include class-level constant
-        lines.append(f"  name = '{self.name}',")
         # include dataclass fields
         for f in fields(self):
             value = getattr(self, f.name)
@@ -101,16 +19,63 @@ class EType:
         lines.append(")")
         return "\n".join(lines)
 
+SURF185_KEYOPT_MAPPING = {
+    2 : ("technology", ("FULL INTEGRATION", "REDUCED INTEGRATION", "ENHANCED STRAIN", "SIMPLIFIED ENHANCED STRAIN")),
+    3 : ("layer", ("LAYERED", "HOMOGENEOUS")),
+    6 : ("formulation", ("PURE DISPLACEMENT", "MIXED UP")),
+    15 : ("pml_absorbing", ("NOT INCLUDED", "INCLUDED")),
+    16 : ("steady_state", ("DISABLED", "ENABLED")),
+    17 : ("extra_surface_output", ("BASIC", "EXTRA")),
+}
+
 @dataclass
 class Solid185(EType):
     """8-Node Structural Solid"""
-    name: ClassVar[str] = "SOLID185"
-    technology : Tech185 = Tech185.full_integration
-    formulation : Form185 = Form185.pure_displacement
-    layering : Layer = Layer.non_layered
-    pml_absorbing : PML =  PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+
+    name = "SOLID185"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION",
+                         "ENHANCED STRAIN",
+                         "SIMPLIFIED ENHANCED STRAIN"] = "FULL INTEGRATION"
+
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    layering : Literal["LAYERED",
+                       "HOMOGENEOUS"] = "HOMOGENEOUS"
+
+    pml_absorbing : Literal["NOT INCLUDED",
+                            "INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["DISABLED",
+                           "ENABLED"] = "DISABLED"      
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+
+    def get_keyopts(self) -> tuple: # ((keyopt_number, keyopt_value), ...)
+        """Returns a tuple of keyopt number and corresponding value based on the current attribute settings."""
+
+        return ((2 ,SURF185_KEYOPT_MAPPING[2][1].index(self.technology)),
+                (3, SURF185_KEYOPT_MAPPING[3][1].index(self.layering)),
+                (6, SURF185_KEYOPT_MAPPING[6][1].index(self.formulation)),
+                (15, SURF185_KEYOPT_MAPPING[15][1].index(self.pml_absorbing)),
+                (16, SURF185_KEYOPT_MAPPING[16][1].index(self.steady_state)),
+                (17, SURF185_KEYOPT_MAPPING[17][1].index(self.extra_surface_output)))
+
+    def set_keyopt(self, keyopt_number: int, value: str):
+        """Sets the attribute corresponding to the keyopt_number to the given value."""
+
+        # raise error if keyopt_number is invalid
+        if keyopt_number not in SURF185_KEYOPT_MAPPING:
+            raise ValueError(f"Invalid keyopt number: {keyopt_number}")
+        # raise error if value is invalid
+        if value not in SURF185_KEYOPT_MAPPING[keyopt_number][1]:
+            raise ValueError(f"Invalid value for keyopt {keyopt_number}: {value}")  
+        # set the attribute
+        setattr(self, SURF185_KEYOPT_MAPPING[keyopt_number][0], 
+                      SURF185_KEYOPT_MAPPING[keyopt_number][1][value])
 
     def __repr__(self):
         return super().__repr__()
@@ -118,25 +83,46 @@ class Solid185(EType):
 @dataclass
 class Solid186:
     """20-Node Structural Solid"""
-    name: ClassVar[str] = "SOLID186"
-    technology : Tech186 = Tech186.reduced_integration
-    formulation : Form186 = Form186.pure_displacement
-    layering : Layer = Layer.non_layered
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+
+    name = "SOLID186"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION"] = "REDUCED INTEGRATION"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    layering : Literal["LAYERED",
+                       "HOMOGENEOUS"] = "HOMOGENEOUS"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+    
 
     def __repr__(self):
         return super().__repr__()
-
+    
 @dataclass
 class Solid187:
 
-    name: ClassVar[str] = "SOLID187"
-    formulation : Form187 = Form187.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "SOLID187"
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "MIXED UP"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
 
     def __repr__(self):
         return super().__repr__()
@@ -144,24 +130,50 @@ class Solid187:
 @dataclass
 class Solid285:
 
-    name: ClassVar[str] = "SOLID285"
-    formulation : Form285 = Form285.mixed_up
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
-
+    name = "SOLID285"
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP WITH CONSTANT PRESSURE",
+                          "MIXED UP WITH LINEAR PRESSURE"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
     def __repr__(self):
         return super().__repr__()
 
 @dataclass
 class Plane182:
 
-    name: ClassVar[str] = "PLANE182"
-    technology : Tech182
-    behaviour : Behv
-    formulation : Form182 = Form182.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "PLANE182"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION",
+                         "ENHANCED STRAIN",
+                         "SIMPLIFIED ENHANCED STRAIN"] = "FULL INTEGRATION"
+    
+    shape : Literal["QUAD 4",
+                    "TRIA 3"] = "QUAD 4"
+
+    behaviour : Literal["PLANE STRESS",
+                       "AXISYMMETRIC",
+                        "PLANE STRAIN",
+                        "PLANE STRESS WITH THICKNESS",
+                        "GENERALIZED PLANE STRAIN",
+                        "AXISYMMETRIC WITH TORSION"] = "PLANE STRESS"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
 
     def __repr__(self):
         return super().__repr__()
@@ -169,12 +181,97 @@ class Plane182:
 @dataclass
 class Plane183:
 
-    name: ClassVar[str] = "PLANE183"
-    shape : Shape
-    behaviour : Behv
-    formulation : Form183 = Form183.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "PLANE183"
+
+    shape : Literal["QUAD 8",
+                    "TRIA 6"] = "QUAD 8"
+    
+    behaviour : Literal["PLANE STRESS",
+                       "AXISYMMETRIC",
+                        "PLANE STRAIN",
+                        "PLANE STRESS WITH THICKNESS",
+                        "GENERALIZED PLANE STRAIN",
+                        "AXISYMMETRIC WITH TORSION"] = "PLANE STRESS"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+
+    def __repr__(self):
+        return super().__repr__()
+    
+##################################
+### Surface Effect Elements
+##################################
+
+class Surf153:
+    """2-D Structural Surface Effect"""
+    pass
+
+SURF154_KEYOPT_MAPPING = {
+    "pressure_cs": (2, ("ELEMENT CS", "LOCAL CS")),
+    "midside_nodes": (4, ("INCLUDE", "EXCLUDE")),
+    "normal_pressure_direction": (6, ("CALCULATED", "POSITIVE ONLY", "NEGATIVE ONLY")),
+    "large_deflection_area": (7, ("USE NEW AREA", "ORIGINAL AREA")),
+    "ocean_loading": (8, ("IGNORE", "APPLY")),
+    "press_vector_orient": (11, ("PRJ AREA + INCLUDE TANGENT",
+                                 "PRJ AREA + EXCLUDE TANGENT",
+                                 "FULL AREA + INCLUDE TANGENT")),
+    "effect_of_direction": (12, ("PRESSURE APPLIED", "PRESSURE SUPPRESSED"))
+}
+
+class Surf154(EType):
+    """3-D Structural Surface Effect"""
+    name = "SURF154"
+    pressure_cs : Literal["ELEMENT CS", "LOCAL CS"] = "ELEMENT CS"
+    midside_nodes : Literal["INCLUDE", "EXCLUDE"] = "INCLUDE"
+    normal_pressure_direction : Literal["CALCULATED", "POSITIVE ONLY", "NEGATIVE ONLY"] | None = None
+    large_deflection_area : Literal["USE NEW AREA", "ORIGINAL AREA"] = "USE NEW AREA"
+    ocean_loading : Literal["IGNORE", "APPLY"] = "IGNORE"
+    press_vector_orient : Literal["PRJ AREA + INCLUDE TANGENT",
+                                  "PRJ AREA + EXCLUDE TANGENT",
+                                  "FULL AREA + INCLUDE TANGENT"] | None = None
+    effect_of_direction : Literal["PRESSURE APPLIED", "PRESSURE SUPPRESSED"] | None = None
+    
+    def get_keyopts(self) -> list:
+        keyopts = []
+        for key, value in SURF154_KEYOPT_MAPPING.items():
+            value = getattr(self, key)
+            if value is not None: 
+                keyopt_number, options = SURF154_KEYOPT_MAPPING[key]
+                keyopt_value = options.index(value)
+                keyopts.append((keyopt_number, keyopt_value))
+        return keyopts
+                    
+    def __repr__(self):
+        return super().__repr__()
+
+##################################
+### MPC184
+##################################
+
+MPC184_KEYOPT_MAPPING = {
+    1 : ("behaviour", ("RigidLink", "RigidBeam", "Slider", "Revolute", "Universal", "Slot", "Point", "Translational", "Cylindrical", "Planar", "Weld", "Orient", "Spherical", "General", "Screw")),
+    2 : ("method", ("Direct Elimination", "Lagrange Multiplier", "Penalty Based Method")),
+    3 : ("configuration", ("x-axis revolute", "y-axis revolute", "displacement and rotational", "only displacement")),
+    5 : ("stress_stiffness", ("Include", "Exclude"))}
+
+class MPC184(EType):
+    
+    name = "MPC184"
+    behaviour : int = 0
+    method : Literal["Direct Elimination", "Lagrange Multiplier", "Penalty Based Method"] = "Lagrange Multiplier"
+    contribution : Literal["Include", "Exclude"] = "Include"
+
+    def get_keyopts(self) -> tuple:
+        return ((1, self.behaviour),
+                (2, ["Direct Elimination", "Lagrange Multiplier", "Penalty Based Method"].index(self.method)),
+                (3, ["Include", "Exclude"].index(self.contribution)))
 
     def __repr__(self):
         return super().__repr__()
@@ -183,8 +280,48 @@ class Plane183:
 ### CONTACT and TARGET Elements
 ##################################
 
-class Conta174:
-    pass
+CONTA174_KEYOPT_MAPPING = {}
+
+class Conta174(EType):
+    
+    name = "CONTA174"
+    real_constants : dict
+    friction : float    # TB material property
+    dof : int = 0   # keyopt1
+    contact_algorithm : Literal["Augmented Lagrange", 
+                                "Penalty", 
+                                "MPC",
+                                "Lagrange+Penalty", 
+                                "Pure Lagrange"] = "Augmented Lagrange" # keyopt2
+    
+    units_of_normal_contact_stiffness : Literal["FORCE/LENGTH^3", "FORCE/LENGTH"] = "FORCE/LENGTH^3" # keyopt3
+
+    location_of_contact_detection_point : Literal["On Gauss Point", 
+                                                  "On Nodal Point-Normal From Contact Surface",
+                                                  "On Nodal Point-Normal To Target Surface",
+                                                  "On Nodal Point-Normal From Contact Surface",
+                                                  "On Nodal Point-Normal From Contact Surface"] = "On Gauss Point" # keyopt4
+    
+    # To define surface based constraints :: For keyopt2 = MPC(2) or Lagrange_Multiplier(3)
+    surface_based_constraint : Literal["Force Distribution",
+                                       "Rigid Surface",
+                                       "Coupling"]
+    
+    # result section :: How motion of the result section is accounted for in large deflection analysis
+    result_section : Literal["Moves with Contact Elements",
+                             "Moves with Underlying Elements"] = "Moves with Contact Elements" # keyopt4
+    
+    automated_adjustment : Literal["Close_Gap",
+                                   "Reduce_Penetration",
+                                   "Close Gap/Reduce Penetration"]
+    
+
+
+
+    
+    
+
+
 
 class Targe170:
     pass
@@ -275,6 +412,7 @@ class MPC184:
 
 
 VALID_ETYPES = {
+    154: Surf154,
     185: Solid185,
     186: Solid186,
     187: Solid187,
@@ -282,6 +420,25 @@ VALID_ETYPES = {
     182: Plane182,
     183: Plane183
 }
+
+name : Literal["VERTEX", # PyVista Cell Types
+                   "LINE",
+                   "TRIA",
+                   "QUAD",
+                   "TETRA",
+                   "HEX",
+                   "WEDGE",
+                   "PYRAMID",
+                   "SURFACE"]
+_etype_map = {
+    "Surf154" : "SURFACE",
+    "Solid185" : "HEX",
+    "Solid186" : "HEX",
+    "Solid187" : "HEX",
+    "Solid285" : ""
+}
+
+
 
 """
 # element type to VTK conversion function call map

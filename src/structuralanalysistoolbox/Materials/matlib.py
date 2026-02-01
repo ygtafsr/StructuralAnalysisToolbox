@@ -32,7 +32,7 @@ def list_materials():
         mat += material + "\n"
     return print(mat)
 
-def _create(self, material):
+def _create(material):
     """converts a material object to a dict, then saves to the database file"""
     _materials[material.name] = _convert_to_dict(material)
     _serialize(_database) # write all database from start

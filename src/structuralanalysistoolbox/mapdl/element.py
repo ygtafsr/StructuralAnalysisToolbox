@@ -1,99 +1,16 @@
 
 from dataclasses import dataclass, fields
-from enum import Enum
-from typing import Literal, ClassVar
+from typing import Literal
 
-
-
-##########################
-## ELEMENT TECHNOLOGIES  
-##########################
-
-class Tech185(Enum): 
-    full_integration = 0
-    reduced_integration = 1
-    enhanced_strain = 2
-    simplified_enhanced_strain = 3
-
-class Tech186(Enum): 
-    reduced_integration = 0
-    full_integration = 1
-
-class Tech182(Enum): 
-    full_integration = 0
-    reduced_integration = 1
-    enhanced_strain = 2
-    simplified_enhanced_strain = 3
-
-##########################
-## ELEMENT FORMULATIONS
-##########################
-
-class Form185(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form186(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form187(Enum): 
-    pure_displacement = 0
-    mixed_up_cons_press = 1
-    mixed_up_lin_press = 2
-
-class Form182(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form183(Enum): 
-    pure_displacement = 0
-    mixed_up = 1
-
-class Form285(Enum):
-    mixed_up = 0
-    pure_displacement = 1
-
-###############################
-
-class Behv(Enum):
-    plane_stress = 0
-    axisymmetric = 1
-    plane_strain = 2
-    plane_stress_with_thickness = 3
-    generalized_plane_strain = 5
-    axisymmetric_with_torsion = 6
-    
-class Layer(Enum): 
-    non_layered = 0
-    layered = 1
-
-class Shape(Enum):
-    quad_8 = 0
-    tria_6 = 1
-
-class PML(Enum) : 
-    not_include = 0
-    include = 1
-
-class Steady(Enum):
-    disabled = 0
-    enabled = 1
-
-class SurfOut(Enum):
-    basic = 0
-    extra = 4
 
 @dataclass
 class EType:
-    name : str = ""
-    midx : int = 0
+    midx : int = 0  # Element type index (Same as in solver)
+    ignore_at_execution = False
 
     def __repr__(self) -> str:
         cls = self.__class__.__name__
         lines = [f"{cls}("]
-        # include class-level constant
-        lines.append(f"  name = '{self.name}',")
         # include dataclass fields
         for f in fields(self):
             value = getattr(self, f.name)
@@ -101,16 +18,63 @@ class EType:
         lines.append(")")
         return "\n".join(lines)
 
+SURF185_KEYOPT_MAPPING = {
+    2 : ("technology", ("FULL INTEGRATION", "REDUCED INTEGRATION", "ENHANCED STRAIN", "SIMPLIFIED ENHANCED STRAIN")),
+    3 : ("layer", ("LAYERED", "HOMOGENEOUS")),
+    6 : ("formulation", ("PURE DISPLACEMENT", "MIXED UP")),
+    15 : ("pml_absorbing", ("NOT INCLUDED", "INCLUDED")),
+    16 : ("steady_state", ("DISABLED", "ENABLED")),
+    17 : ("extra_surface_output", ("BASIC", "EXTRA")),
+}
+
 @dataclass
 class Solid185(EType):
     """8-Node Structural Solid"""
-    name: ClassVar[str] = "SOLID185"
-    technology : Tech185 = Tech185.full_integration
-    formulation : Form185 = Form185.pure_displacement
-    layering : Layer = Layer.non_layered
-    pml_absorbing : PML =  PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+
+    name = "SOLID185"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION",
+                         "ENHANCED STRAIN",
+                         "SIMPLIFIED ENHANCED STRAIN"] = "FULL INTEGRATION"
+
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    layering : Literal["LAYERED",
+                       "HOMOGENEOUS"] = "HOMOGENEOUS"
+
+    pml_absorbing : Literal["NOT INCLUDED",
+                            "INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["DISABLED",
+                           "ENABLED"] = "DISABLED"      
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+
+    def get_keyopts(self) -> tuple: # ((keyopt_number, keyopt_value), ...)
+        """Returns a tuple of keyopt number and corresponding value based on the current attribute settings."""
+
+        return ((2 ,SURF185_KEYOPT_MAPPING[2][1].index(self.technology)),
+                (3, SURF185_KEYOPT_MAPPING[3][1].index(self.layering)),
+                (6, SURF185_KEYOPT_MAPPING[6][1].index(self.formulation)),
+                (15, SURF185_KEYOPT_MAPPING[15][1].index(self.pml_absorbing)),
+                (16, SURF185_KEYOPT_MAPPING[16][1].index(self.steady_state)),
+                (17, SURF185_KEYOPT_MAPPING[17][1].index(self.extra_surface_output)))
+
+    def set_keyopt(self, keyopt_number: int, value: str):
+        """Sets the attribute corresponding to the keyopt_number to the given value."""
+
+        # raise error if keyopt_number is invalid
+        if keyopt_number not in SURF185_KEYOPT_MAPPING:
+            raise ValueError(f"Invalid keyopt number: {keyopt_number}")
+        # raise error if value is invalid
+        if value not in SURF185_KEYOPT_MAPPING[keyopt_number][1]:
+            raise ValueError(f"Invalid value for keyopt {keyopt_number}: {value}")  
+        # set the attribute
+        setattr(self, SURF185_KEYOPT_MAPPING[keyopt_number][0], 
+                      SURF185_KEYOPT_MAPPING[keyopt_number][1][value])
 
     def __repr__(self):
         return super().__repr__()
@@ -118,25 +82,46 @@ class Solid185(EType):
 @dataclass
 class Solid186:
     """20-Node Structural Solid"""
-    name: ClassVar[str] = "SOLID186"
-    technology : Tech186 = Tech186.reduced_integration
-    formulation : Form186 = Form186.pure_displacement
-    layering : Layer = Layer.non_layered
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+
+    name = "SOLID186"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION"] = "REDUCED INTEGRATION"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    layering : Literal["LAYERED",
+                       "HOMOGENEOUS"] = "HOMOGENEOUS"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+    
 
     def __repr__(self):
         return super().__repr__()
-
+    
 @dataclass
 class Solid187:
 
-    name: ClassVar[str] = "SOLID187"
-    formulation : Form187 = Form187.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "SOLID187"
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "MIXED UP"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
 
     def __repr__(self):
         return super().__repr__()
@@ -144,24 +129,50 @@ class Solid187:
 @dataclass
 class Solid285:
 
-    name: ClassVar[str] = "SOLID285"
-    formulation : Form285 = Form285.mixed_up
-    pml_absorbing : PML = PML.not_include
-    steady_state : Steady = Steady.disabled
-    extra_surface_output : SurfOut = SurfOut.basic
-
+    name = "SOLID285"
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP WITH CONSTANT PRESSURE",
+                          "MIXED UP WITH LINEAR PRESSURE"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    steady_state : Literal["ENABLED",
+                          "DISABLED"] = "DISABLED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
     def __repr__(self):
         return super().__repr__()
 
 @dataclass
 class Plane182:
 
-    name: ClassVar[str] = "PLANE182"
-    technology : Tech182
-    behaviour : Behv
-    formulation : Form182 = Form182.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "PLANE182"
+
+    technology : Literal["FULL INTEGRATION",
+                         "REDUCED INTEGRATION",
+                         "ENHANCED STRAIN",
+                         "SIMPLIFIED ENHANCED STRAIN"] = "FULL INTEGRATION"
+    
+    shape : Literal["QUAD 4",
+                    "TRIA 3"] = "QUAD 4"
+
+    behaviour : Literal["PLANE STRESS",
+                       "AXISYMMETRIC",
+                        "PLANE STRAIN",
+                        "PLANE STRESS WITH THICKNESS",
+                        "GENERALIZED PLANE STRAIN",
+                        "AXISYMMETRIC WITH TORSION"] = "PLANE STRESS"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
 
     def __repr__(self):
         return super().__repr__()
@@ -169,12 +180,97 @@ class Plane182:
 @dataclass
 class Plane183:
 
-    name: ClassVar[str] = "PLANE183"
-    shape : Shape
-    behaviour : Behv
-    formulation : Form183 = Form183.pure_displacement
-    pml_absorbing : PML = PML.not_include
-    extra_surface_output : SurfOut = SurfOut.basic
+    name = "PLANE183"
+
+    shape : Literal["QUAD 8",
+                    "TRIA 6"] = "QUAD 8"
+    
+    behaviour : Literal["PLANE STRESS",
+                       "AXISYMMETRIC",
+                        "PLANE STRAIN",
+                        "PLANE STRESS WITH THICKNESS",
+                        "GENERALIZED PLANE STRAIN",
+                        "AXISYMMETRIC WITH TORSION"] = "PLANE STRESS"
+    
+    formulation : Literal["PURE DISPLACEMENT",
+                          "MIXED UP"] = "PURE DISPLACEMENT"
+    
+    pml_absorbing : Literal["INCLUDED",
+                            "NOT INCLUDED"] = "NOT INCLUDED"
+    
+    extra_surface_output : Literal["BASIC",
+                                   "EXTRA"] = "BASIC"
+
+    def __repr__(self):
+        return super().__repr__()
+    
+##################################
+### Surface Effect Elements
+##################################
+
+class Surf153:
+    """2-D Structural Surface Effect"""
+    pass
+
+SURF154_KEYOPT_MAPPING = {
+    "pressure_cs": (2, ("ELEMENT CS", "LOCAL CS")),
+    "midside_nodes": (4, ("INCLUDE", "EXCLUDE")),
+    "normal_pressure_direction": (6, ("CALCULATED", "POSITIVE ONLY", "NEGATIVE ONLY")),
+    "large_deflection_area": (7, ("USE NEW AREA", "ORIGINAL AREA")),
+    "ocean_loading": (8, ("IGNORE", "APPLY")),
+    "press_vector_orient": (11, ("PRJ AREA + INCLUDE TANGENT",
+                                 "PRJ AREA + EXCLUDE TANGENT",
+                                 "FULL AREA + INCLUDE TANGENT")),
+    "effect_of_direction": (12, ("PRESSURE APPLIED", "PRESSURE SUPPRESSED"))
+}
+
+class Surf154(EType):
+    """3-D Structural Surface Effect"""
+    name = "SURF154"
+    pressure_cs : Literal["ELEMENT CS", "LOCAL CS"] = "ELEMENT CS"
+    midside_nodes : Literal["INCLUDE", "EXCLUDE"] = "INCLUDE"
+    normal_pressure_direction : Literal["CALCULATED", "POSITIVE ONLY", "NEGATIVE ONLY"] | None = None
+    large_deflection_area : Literal["USE NEW AREA", "ORIGINAL AREA"] = "USE NEW AREA"
+    ocean_loading : Literal["IGNORE", "APPLY"] = "IGNORE"
+    press_vector_orient : Literal["PRJ AREA + INCLUDE TANGENT",
+                                  "PRJ AREA + EXCLUDE TANGENT",
+                                  "FULL AREA + INCLUDE TANGENT"] | None = None
+    effect_of_direction : Literal["PRESSURE APPLIED", "PRESSURE SUPPRESSED"] | None = None
+    
+    def get_keyopts(self) -> list:
+        keyopts = []
+        for key, value in SURF154_KEYOPT_MAPPING.items():
+            value = getattr(self, key)
+            if value is not None: 
+                keyopt_number, options = SURF154_KEYOPT_MAPPING[key]
+                keyopt_value = options.index(value)
+                keyopts.append((keyopt_number, keyopt_value))
+        return keyopts
+                    
+    def __repr__(self):
+        return super().__repr__()
+
+##################################
+### MPC184
+##################################
+
+MPC184_KEYOPT_MAPPING = {
+    1 : ("behaviour", ("RigidLink", "RigidBeam", "Slider", "Revolute", "Universal", "Slot", "Point", "Translational", "Cylindrical", "Planar", "Weld", "Orient", "Spherical", "General", "Screw")),
+    2 : ("method", ("Direct Elimination", "Lagrange Multiplier", "Penalty Based Method")),
+    3 : ("configuration", ("x-axis revolute", "y-axis revolute", "displacement and rotational", "only displacement")),
+    5 : ("stress_stiffness", ("Include", "Exclude"))}
+
+class MPC184(EType):
+    
+    name = "MPC184"
+    behaviour : int = 0
+    method : Literal["Direct Elimination", "Lagrange Multiplier", "Penalty Based Method"] = "Lagrange Multiplier"
+    contribution : Literal["Include", "Exclude"] = "Include"
+
+    def get_keyopts(self) -> tuple:
+        return ((1, self.behaviour),
+                (2, ["Direct Elimination", "Lagrange Multiplier", "Penalty Based Method"].index(self.method)),
+                (3, ["Include", "Exclude"].index(self.contribution)))
 
     def __repr__(self):
         return super().__repr__()
@@ -182,13 +278,408 @@ class Plane183:
 ##################################
 ### CONTACT and TARGET Elements
 ##################################
+@dataclass
+class ContaRealConstants:
+    """REAL CONSTANTS for CONTA174 element."""
+    midx : int = 0
+    r1 : float | str = ''  # Target radius for cylinder, cone, or sphere
+    r2 : float | str = ''  # Target radius at second node of cone
+    fkn : float | str = '' # Normal penalty stiffness factor / weightenin factor for MPC_RBE3
+    ftoln : float | str = '' # Penetration tolerance factor
+    icont : float | str = '' # Initial contact closure
+    pinb : float | str = '' # Pinball region
+    pzer : float | str = '' # Pressure at zero penetration
+    czer : float | str = '' # Initial contact clearance
+    taumax : float | str = '' # Maximum friction stress
+    cnof : float | str = ''  # Contact surface offset
+    fkop : float | str = ''  # Contact openning stiffness
+    fkt : float | str = '' # Tangential penalty stiffness factor
+    cohe : float | str = '' # Contact cohesion
+    fact : float | str = '' # Static/Dynamic ratio
+    dc : float | str = '' # Exponential decay coefficient
+    slto : float | str = '' # Allowable elastic slip
+    tnop : float | str = '' # Maximum allowable tensile contact pressure
+    tols : float | str = '' # Target edge extension factor
+    ppcn : float | str = '' # Pressure penetration criteria
+    fpat : float | str = '' # Fluid penetration acting time
+    cor : float | str = '' # Coefficient of restitution
+    strm : float | str = '' # Load step number for ramping penetration OR 
+                        # Starting time for contact stiffness ramping
+    fdmn : float | str = '' # Normal stabilization damping factor
+    fdmt : float | str = '' # Tangential stabilization damping factor
+    fdmd : float | str = '' # Destabilization squeal damping factor
+    fdms : float | str = '' # Stabilization squeal damping factor
+    bsrl : int | str = '' # Original contact pair real constant ID (after contact splitting)
+    ksym : int | str = '' # Real constant ID of the associated companion pair for symmetric contact or self contact (after contact splitting)
+    tfor : float | str = '' # Pair-based force tolerance
+    tend : float | str = '' # End time for ramping contact stiffness
 
-class Conta174:
+    def get_real_constants(self) -> tuple:
+        """Create a 8x6 tuple of real constants for CONTA174 element."""
+        return ((self.r1, self.r2, self.fkn, self.ftoln, self.icont, self.pinb),
+                (self.pzer, self.czer, self.taumax, self.cnof, self.fkop, self.fkt),
+                (self.cohe, '', '', '', '', ''),
+                ('', '', self.fact, self.dc, self.slto, self.tnop),
+                (self.tols, '', self.ppcn, self.fpat, self.cor, self.strm),
+                (self.fdmn, self.fdmt, self.fdmd, self.fdms, '', ''),
+                ('', '', '', '', '', ''),
+                ('', '', self.bsrl, self.ksym, self.tfor, self.tend))
+
+class Conta172:
+    "2-D 3-Node Surface-to-Surface Contact"
     pass
 
-class Targe170:
+CONTA174_KEYOPT_MAPPING = {
+    "dof" : (1, ("UX UY UZ", 0), ("UX UY UZ TEMP", 1), ("UX UY UZ PRES", 8), ("UX UY UZ PRES TEMP", 9)),
+    "contact_algorithm" : (2, ("Augmented Lagrange", 0), ("Penalty", 1), ("MPC", 2), ("Lagrange & Penalty", 3), ("Lagrange", 4)),
+    "units_of_normal_contact_stiffness" : (3, ("FORCE/LENGTH^3", 0), ("FORCE/LENGTH", 1)),
+    "contact_detection" : (4, ("At Gauss Point", 0), ("Node: Normal From Contact/RBE3", 1), ("Node: Normal To Target/CERIGID", 2), ("Node: Surface Projection/CP", 3), ("Node: Dual Shape Projection", 4)),
+    "surface_based_constraint" : (4, ("Force Distribution", 1), ("Rigid Surface", 2), ("Coupling", 3)),
+    "result_section" : (4, ("Moves with Contact Elements", 1), ("Moves with Underlying Elements", 2)),
+    "auto_adjustment" : (5, ("No Auto Adjustment", 0), ("Close_Gap", 1), ("Reduce_Penetration", 2), ("Close Gap/Reduce Penetration", 3), ("Default ICONT", 4)),
+    "auto_contact_stiffness_change" : (6, ("Standard", 0), ("Aggressive", 1), ("Very Aggressive", 2), ("Exponential", 3)),
+    "contact_time_load_prediction" : (7, ("No Predictions", 0), ("Automatic Bisection", 1), ("Reasonable T/L increment", 2), ("Minimum T/L increment", 3), ("Impact Constraint", 4)),
+    "asymmetric_contact_active" : (8, ("Yes", 2)),
+    "initial_penetration_gap" : (9, ("Include",0), ("Exclude", 1), ("Include - Ramp",2), ("Offset Only", 3), ("Offset - Ramp", 4), ("Always Offset Only", 5), ("Always Offset - Ramp", 6)),
+    "contact_stiffness_update" : (10, ("Each Iteration", 0), ("Each Load Step", 1), ("Each Iteration & Slip Limit", 2)),
+    "shell_thickness_effect" : (11, ("Exclude", 0), ("Include", 1)),
+    "behaviour" : (12, ("Standard", 0), ("Rough", 1), ("No Seperation", 2), ("Bonded", 3), ("No Seperation (always)", 4), ("Bonded (always)", 5), ("Bonded (initial)", 6)),
+    "fluid_penetration_load" : (14, ("Iteration Based", 0), ("Substep Based", 1), ("Iteration & From Starting Points", 2), ("Substep & From Strating Points", 3)),
+    "effect_of_stabilization_damping" : (15, ("Active in 1st Load Step", 0), ("Deactive Auto Damping", 1), ("Active For All Load Steps", 2), ("Active All the Time", 3)),
+    "input_of_squeal_dampings" : (16, ("Damping Factor",0), ("MU-Slip velocity", 1), ("Damping Coefficient", 2)),
+    "sliding_behaviour" : (18, ("Finite Sliding", 0), ("Small Sliding", 1), ("Adaptive Small Sliding", 2))
+}
+
+@dataclass
+class Conta174(EType):
+    "3-D 8-Node Surface-to-Surface Contact"
+    name = "CONTA174"
+
+    dof : Literal["UX UY UZ",
+                  "UX UY UZ TEMP",
+                  "UX UY UZ PRES",
+                  "UX UY UZ PRES TEMP"] = "UX UY UZ" # keyopt1
+    
+    contact_algorithm : Literal["Augmented Lagrange", 
+                                "Penalty", 
+                                "MPC",
+                                "Lagrange & Penalty", 
+                                "Lagrange"] = "Augmented Lagrange" # keyopt2
+    
+    units_of_normal_contact_stiffness : Literal["FORCE/LENGTH^3", "FORCE/LENGTH"] = "FORCE/LENGTH^3" # keyopt3
+
+    contact_detection : Literal["At Gauss Point", 
+                                "Node: Normal From Contact/RBE3",
+                                "Node: Normal To Target/CERIGID",
+                                "Node: Surface Projection/CP",
+                                "Node: Dual Shape Projection"] = "At Gauss Point" # keyopt4
+    
+    # Alternate keyopt4 usage with Surface-Based Constraints
+    # To define surface based constraints :: For keyopt2 = MPC(2) or Lagrange_Multiplier(3)
+    surface_based_constraint : Literal["Force Distribution",
+                                       "Rigid Surface",
+                                       "Coupling"] | None = None # keyopt4
+
+    # Alternate keyopt4 usage with result sections
+    # result section :: How motion of the result section is accounted for in large deflection analysis
+    result_section : Literal["Moves with Contact Elements",
+                             "Moves with Underlying Elements"] | None = None # keyopt4
+
+    auto_adjustment : Literal["No Auto Adjustment",
+                              "Close_Gap",
+                              "Reduce_Penetration",
+                              "Close Gap/Reduce Penetration",
+                              "Default ICONT"] | None = None # keyopt5
+    
+    auto_contact_stiffness_change : Literal["Standard", 
+                                            "Aggressive",
+                                            "Very Aggressive",
+                                            "Exponential"] | None = None # keyopt6
+    
+    contact_time_load_prediction : Literal["No Predictions",
+                                           "Automatic Bisection",
+                                           "Reasonable T/L increment",
+                                           "Minimum T/L increment",
+                                           "Impact Constraint"] | None = None # keyopt7
+    
+    asymmetric_contact_active : Literal["Yes"] | None = None # keyopt8
+    
+    initial_penetration_gap : Literal["Include",
+                                      "Exclude",
+                                      "Include - Ramp",
+                                      "Offset Only",
+                                      "Offset - Ramp"
+                                      "Always Offset Only",
+                                      "Always Offset - Ramp"] | None = None # keyopt9
+    
+    contact_stiffness_update : Literal["Each Iteration",
+                                       "Each Load Step",
+                                       "Each Iteration & Slip Limit"] | None = None # keyopt10
+    
+    shell_thickness_effect : Literal["Exclude", "Include"] | None = None # keyopt11
+
+    behaviour : Literal["Standard", 
+                        "Rough", 
+                        "No Seperation", 
+                        "Bonded", 
+                        "No Seperation (always)",
+                        "Bonded (always)",
+                        "Bonded (initial)"] | None = None # keyopt12
+    
+    # dof_control_for_thermal_shells : keyopt13
+    
+    fluid_penetration_load : Literal["Iteration Based",
+                                     "Substep Based",
+                                     "Iteration & From Starting Points",
+                                     "Substep & From Strating Points"] | None = None # keyopt14
+
+    effect_of_stabilization_damping : Literal["Active in 1st Load Step",
+                                              "Deactive Auto Damping",
+                                              "Active For All Load Steps",
+                                              "Active All the Time"] | None = None # keyopt15
+    
+    input_of_squeal_dampings : Literal["Damping Factor",
+                                       "MU-Slip velocity",
+                                       "Damping Coefficient"] | None = None # keyopt16
+    
+    sliding_behaviour : Literal["Finite Sliding",
+                                "Small Sliding",
+                                "Adaptive Small Sliding"] = "Finite Sliding" # keyopt18
+    
+    def get_keyopts(self) -> list | None:
+        keyopts = []
+        for key in CONTA174_KEYOPT_MAPPING.keys():
+            if getattr(self, key) == None:
+                continue # do not add keyopt into keyopts list if its value is 'None'
+            else:
+                _keyopt_id = CONTA174_KEYOPT_MAPPING[key][0]
+                _keyopt_val = next(val[1] for val in CONTA174_KEYOPT_MAPPING[key][1:] if key == val[0])
+                keyopts.append((_keyopt_id, _keyopt_val))
+        return keyopts or None
+            
+CONTA175_KEYOPT_MAPPING = {
+    "dof" : (1, ("UX UY UZ", 0), ("UX UY UZ TEMP", 1), ("UX UY UZ PRES", 8), ("UX UY UZ PRES TEMP", 9)),
+    "contact_algorithm" : (2, ("Augmented Lagrange", 0), ("Penalty", 1), ("MPC", 2), ("Lagrange & Penalty", 3), ("Lagrange", 4)),
+    "contact_model" : (3, ("Contact Force Based", 0), ("Contact Traction Based", 1)),
+    "contact_normal_direction" : (4, ("Normal To Target Surface", 0), ("Normal From Contact Nodes", 1), ("Normal From Contact Nodes (Shell/Beam)", 2), ("Normal To Target Surface (Shell/Beam)", 3)),
+    "surface_based_constraint" : (4, ("Rigid Surface", 0), ("Force Distribution", 1), ("Coupling", 3)),
+    "auto_adjustment" : (5, ("No Auto Adjustment", 0), ("Close_Gap", 1), ("Reduce_Penetration", 2), ("Close Gap/Reduce Penetration", 3), ("Default ICONT", 4)),
+    "auto_contact_stiffness_change" : (6, ("Standard", 0), ("Aggressive", 1), ("Very Aggressive", 2), ("Exponential", 3)),
+    "contact_time_load_prediction" : (7, ("No Predictions", 0), ("Automatic Bisection", 1), ("Reasonable T/L increment", 2), ("Minimum T/L increment", 3), ("Impact Constraint", 4)),
+    "asymmetric_contact_active" : (8, ("Yes", 2)),
+    "initial_penetration_gap" : (9, ("Include",0), ("Exclude", 1), ("Include - Ramp",2), ("Offset Only", 3), ("Offset - Ramp", 4), ("Always Offset Only", 5), ("Always Offset - Ramp", 6)),
+    "contact_stiffness_update" : (10, ("Each Iteration", 0), ("Each Load Step", 1), ("Each Iteration & Slip Limit", 2)),
+    "shell_thickness_effect" : (11, ("Exclude", 0), ("Include", 1)),
+    "behaviour" : (12, ("Standard", 0), ("Rough", 1), ("No Seperation", 2), ("Bonded", 3), ("No Seperation (always)", 4), ("Bonded (always)", 5), ("Bonded (initial)", 6)),
+    "fluid_penetration_load" : (14, ("Iteration Based", 0), ("Substep Based", 1), ("Iteration & From Starting Points", 2), ("Substep & From Strating Points", 3)),
+    "effect_of_stabilization_damping" : (15, ("Active in 1st Load Step", 0), ("Deactive Auto Damping", 1), ("Active For All Load Steps", 2), ("Active All the Time", 3)),
+    "input_of_squeal_dampings" : (16, ("Damping Factor",0), ("MU-Slip velocity", 1), ("Damping Coefficient", 2)),
+    "sliding_behaviour" : (18, ("Finite Sliding", 0), ("Small Sliding", 1), ("Adaptive Small Sliding", 2))
+}
+
+@dataclass
+class Conta175(EType):
+    """
+    2-D/3-D Node-to-Surface Contact
+    EXAMPLE :: 
+    keyo,cid,12,5              ! Bonded Contact (Bonded Always)
+    keyo,cid,4,1               ! Deformable RBE3 style load (Force Distribution)
+    keyo,cid,2,2               ! MPC style contact (MPC)
+    """
+
+    name = "CONTA175"
+
+    dof : Literal["UX UY UZ", # Default
+                  "UX UY UZ TEMP",
+                  "UX UY UZ PRES",
+                  "UX UY UZ PRES TEMP"] | None = None # keyopt1
+    
+    contact_algorithm : Literal["Augmented Lagrange", # Default
+                                "Penalty", 
+                                "MPC",
+                                "Lagrange & Penalty", 
+                                "Lagrange"] | None = None # keyopt2
+    
+    contact_model : Literal["Contact Force Based", # Default
+                            "Contact Traction Based"] | None = None # keyopt3
+
+    contact_normal_direction : Literal["Normal To Target Surface",  # Default
+                                       "Normal From Contact Nodes",
+                                       "Normal From Contact Nodes (Shell/Beam)",
+                                       "Normal To Target Surface (Shell/Beam)"] | None = None # keyopt4
+    
+    # Alternate keyopt4 usage with Surface-Based Constraints
+    surface_based_constraint : Literal["Rigid Surface",
+                                       "Force Distribution",
+                                       "Coupling"] | None = None # keyopt4
+
+    auto_adjustment : Literal["No Auto Adjustment",
+                              "Close_Gap",
+                              "Reduce_Penetration",
+                              "Close Gap/Reduce Penetration",
+                              "Default ICONT"] | None = None # keyopt5
+    
+    auto_contact_stiffness_change : Literal["Standard", 
+                                            "Aggressive",
+                                            "Very Aggressive",
+                                            "Exponential"] | None = None # keyopt6
+    
+    contact_time_load_prediction : Literal["No Predictions",
+                                           "Automatic Bisection",
+                                           "Reasonable T/L increment",
+                                           "Minimum T/L increment",
+                                           "Impact Constraint"] | None = None # keyopt7
+    
+    asymmetric_contact_active : Literal["Yes"] | None = None # keyopt8
+    
+    initial_penetration_gap : Literal["Include",
+                                      "Exclude",
+                                      "Include - Ramp",
+                                      "Offset Only",
+                                      "Offset - Ramp"
+                                      "Always Offset Only",
+                                      "Always Offset - Ramp"] | None = None # keyopt9
+    
+    contact_stiffness_update : Literal["Each Iteration",
+                                       "Each Load Step",
+                                       "Each Iteration & Slip Limit"] | None = None # keyopt10
+    
+    shell_thickness_effect : Literal["Exclude", "Include"] | None = None # keyopt11
+
+    behaviour : Literal["Standard", 
+                        "Rough", 
+                        "No Seperation", 
+                        "Bonded", 
+                        "No Seperation (always)",
+                        "Bonded (always)",
+                        "Bonded (initial)"] | None = None # keyopt12
+    
+    # dof_control_for_thermal_shells : keyopt13
+    
+    fluid_penetration_load : Literal["Iteration Based",
+                                     "Substep Based",
+                                     "Iteration & From Starting Points",
+                                     "Substep & From Strating Points"] | None = None # keyopt14
+
+    effect_of_stabilization_damping : Literal["Active in 1st Load Step",
+                                              "Deactive Auto Damping",
+                                              "Active For All Load Steps",
+                                              "Active All the Time"] | None = None # keyopt15
+    
+    input_of_squeal_dampings : Literal["Damping Factor",
+                                       "MU-Slip velocity",
+                                       "Damping Coefficient"] | None = None # keyopt16
+    
+    sliding_behaviour : Literal["Finite Sliding", # Default
+                                "Small Sliding",
+                                "Adaptive Small Sliding"] | None = None # keyopt18
+        
+    def get_keyopts(self) -> list | None:
+        keyopts = []
+        for key in CONTA175_KEYOPT_MAPPING.keys():
+            _value = getattr(self, key)
+            if _value == None:
+                continue # do not add keyopt into keyopts list if its value is 'None'
+            else:
+                _keyopt_id = CONTA175_KEYOPT_MAPPING[key][0]
+                _keyopt_val = next(val[1] for val in CONTA175_KEYOPT_MAPPING[key][1:] if _value == val[0])
+                keyopts.append((_keyopt_id, _keyopt_val))
+        return keyopts or None
+
+class Conta177:
+    "3-D Line-to-Surface Contact"
     pass
 
+class Targe169:
+    pass
+
+TARGE170_KEYOPT_MAPPING = {
+    "element_order" : (1, ("Low Order", 0), ("High Order", 1)),
+    "bc_for_rigid_target_nodes" : (2, ("Auto Constraint", 0), ("User Definition", 1)),
+    "dof" : None,
+    "type_of_constraint" : (5, ("Auto", 0), ("Proj Constraint U Dof Only", 1), ("Proj Constraint U+R Dof", 2), ("Disp Constraint (Norm Dir)", 3), ("Disp Constraint (All Dir)", 4), ("Disp Constraint (Anywhere)", 5)),
+    "constrained_surface_symmetry" : (6, ("Pilot XY Plane", "100"), ("Pilot XZ Plane", "10"), ("Pilot YZ Plane", "1"), ("Pilot XY + XZ", "110"), ("Pilot XY + YZ", "101"), ("Pilot XZ + YZ", "11")),
+    "weighting_factor" : (7, ("Internal", 0), ("1", 1), ("User Defined", 2)),
+    "beam_to_beam_contact_type" : (9, ("External", 0), ("Internal", 1)),
+    "stress_stiffening_effect" : (10, ("Do Not Include", 0), ("Include", 1)),
+    "relaxion_method" : (11, ("Do Not Use", 0), ("Use", 1)),
+    "thermal_expansion_effect" : (12, ("Do Not Include", 0), ("Include", 1))
+}
+
+@dataclass
+class Targe170(EType):
+    """
+    EXAMPLE
+    keyo,tid,2,1               ! Don't fix the pilot node (User Definition) ????
+    keyo,tid,4,0               ! Activate all DOF's due to large deformation (0 actives all!!!)
+    """
+
+    name = "TARGE170"
+
+    element_order : Literal["Low Order", "High Order"] = "Low Order" #K1
+
+    bc_for_rigid_target_nodes : Literal["Auto Constraint", "User Definition"] = "Auto Constraint" #K2 
+
+    # Thermal contact behaviour #K3
+
+    dof :  tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ") #K4 
+
+    # This keyopt(5) is not used for surface-based constraints.
+    type_of_constraint : Literal["Auto", 
+                                 "Proj Constraint U Dof Only",
+                                 "Proj Constraint U+R Dof",
+                                 "Disp Constraint (Norm Dir)",
+                                 "Disp Constraint (All Dir)",
+                                 "Disp Constraint (Anywhere)"] = "Auto" #K5
+
+    constrained_surface_symmetry : Literal["Pilot XY Plane",
+                                           "Pilot XZ Plane",
+                                           "Pilot YZ Plane",
+                                           "Pilot XY + XZ",
+                                           "Pilot XY + YZ",
+                                           "Pilot XZ + YZ"] | None = None #K6
+
+    weighting_factor : Literal["Internal", "1", "User Defined"] | None = None #K7
+
+    beam_to_beam_contact_type : Literal["External", "Internal"] | None = None #K9
+
+    stress_stiffening_effect : Literal["Do Not Include", "Include"] | None = None #K10
+
+    relaxion_method : Literal["Do Not Use", "Use"] | None = None  #K11
+
+    thermal_expansion_effect : Literal["Do Not Include", "Include"] | None = None #K12
+
+
+    def __post_init__(self):
+        # post dof setting 
+        ux = uy = uz = rotx = roty = rotz = 0
+        if "UX" in self.dof:
+            ux = 1
+        if "UY" in self.dof:
+            uy = 1
+        if "UZ" in self.dof:
+            uz = 1
+        if "ROTX" in self.dof:
+            rotx = 1
+        if "ROTY" in self.dof:
+            roty = 1
+        if "ROTZ" in self.dof:
+            rotz = 1
+        TARGE170_KEYOPT_MAPPING["dof"]= (4, (self.dof, f'{ux}{uy}{uz}{rotx}{roty}{rotz}'))
+        #TARGE170_KEYOPT_MAPPING["dof"]= (4, (self.dof, f'0'))
+
+    def get_keyopts(self) -> list | None:
+        keyopts = []
+        for key in TARGE170_KEYOPT_MAPPING.keys():
+            _value = getattr(self, key)
+            if _value == None:
+                continue # do not add keyopt into keyopts list if its value is 'None'
+            else:
+                _keyopt_id = TARGE170_KEYOPT_MAPPING[key][0]
+                _keyopt_val = next(val[1] for val in TARGE170_KEYOPT_MAPPING[key][1:] if _value == val[0])
+                keyopts.append((_keyopt_id, _keyopt_val))
+        return keyopts or None
+        
 
 ########################################################
 ### SECTION Definitons for the elements with two points
@@ -275,6 +766,7 @@ class MPC184:
 
 
 VALID_ETYPES = {
+    154: Surf154,
     185: Solid185,
     186: Solid186,
     187: Solid187,
@@ -282,6 +774,25 @@ VALID_ETYPES = {
     182: Plane182,
     183: Plane183
 }
+
+name : Literal["VERTEX", # PyVista Cell Types
+                   "LINE",
+                   "TRIA",
+                   "QUAD",
+                   "TETRA",
+                   "HEX",
+                   "WEDGE",
+                   "PYRAMID",
+                   "SURFACE"]
+_etype_map = {
+    "Surf154" : "SURFACE",
+    "Solid185" : "HEX",
+    "Solid186" : "HEX",
+    "Solid187" : "HEX",
+    "Solid285" : ""
+}
+
+
 
 """
 # element type to VTK conversion function call map

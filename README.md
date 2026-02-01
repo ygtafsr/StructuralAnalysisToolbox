@@ -38,6 +38,11 @@ External Mesh Import --> Modelling --> Send to the Solver
  ├── Contacts
  └── Load Steps
 ```
+
+## Methods
+
+
+
 ## Visualization Example : Load-History Plot
 
 ![](images/load-history.png)

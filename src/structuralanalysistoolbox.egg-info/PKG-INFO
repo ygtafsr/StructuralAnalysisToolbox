@@ -7,6 +7,60 @@ Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: ansys-mapdl-core>=0.71.1
+Requires-Dist: ansys-dpf-post>=0.11.0
 Dynamic: license-file
 
-1-) PyAnsys High-Level Structural Analysis Toolbos
+# Structural Analysis Toolbox (stbox)
+
+The main target of the library is creating an easy to follow structural analysis (solid mechanics) modelling workflow and implementation with a solver (mapdl). It provides a high-level implementation of apdl commands through PyMAPDL. 
+
+## Key Features
+
+* Internal Material Library (CRUD support)
+* Readable Type-Hints
+* Extensive Visualization
+* OOP approach
+
+## Workflow
+
+External Mesh Import --> Modelling --> Send to the Solver
+
+## An Example Project Structure
+```text
+ ├── Element Types
+ │   ├── SOLID185
+ │   └── MPC184
+ ├── Materials
+ │   └── My Steel
+ ├── Sets
+ │   ├── Node Sets
+ │   │   ├── NS_FIX
+ │   │   ├── NS_LOAD
+ │   │   └── NS_LOAD_DEPEN
+ │   └── Element Sets
+ │       └── MESH
+ ├── Surfaces
+ ├── Sections
+ ├── Constraints
+ │   ├── Linear Couplings
+ │   ├── Constraint Equations
+ │   ├── MPC
+ │   │   └── MPC-1
+ │   └── Joints
+ ├── Contacts
+ └── Load Steps
+```
+## Visualization Example : Load-History Plot
+
+![](images/load-history.png)
+
+## Installation
+
+..
+
+## Usage
+
+[stbox Examples](examples)
+
+
+

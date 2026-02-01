@@ -1,19 +1,19 @@
 
 from __future__ import annotations
 import functools
-import ansys.mapdl.core as core
 import numpy as np
-from enum import Enum
-
+import ansys.mapdl.core as core
 from structuralanalysistoolbox.materials import material
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from structuralanalysistoolbox.mapdl.mesh import Mesh
-
+    
+    from structuralanalysistoolbox.data.mesh import Mesh
+    from structuralanalysistoolbox.mapdl import element
     from structuralanalysistoolbox import model
+    from structuralanalysistoolbox.model import Nset, Elset, Surface, PilotNode
     from structuralanalysistoolbox.constraints import constraint
-    from structuralanalysistoolbox.loading import loadstep
+    from structuralanalysistoolbox.loading.loadstep import LoadStep, Force, Moment, Pressure, Displacement
 
 def prep7(func):
     @functools.wraps(func)
@@ -32,6 +32,132 @@ def solu(func):
         args[0].finish()
         return val
     return wrapper_solu
+
+##########################################
+#### MISCALENOUS HELPER FUNCTIONS
+##########################################
+
+def is_surface_node(node_id : int) -> bool:
+    "TODO: later implement for VTK"
+    # Get a node
+    # Find all connected elements connected to this node
+    # 
+    
+    return True
+
+def get_face_ids(nset : Nset) -> np.ndarray | None:
+    """
+    Get a node list. 
+    Select nodes in the list
+    Find conncected elements
+    
+    get elements face node list:
+    MAPDL COMMANDs:
+
+        *DIM, ENODES, ARRAY, 20 
+        *VGET, ENODES(1), ELEM, 1800, NODE, 1,,,4
+
+        For Solid 185:  I - J - K - L - M - N - O - P
+            array idx:  0   1   2   3   4   5   6   7
+
+        Face1 (J-I-L-K) (1,0,3,2)
+        Face2 (I-J-N-M) (0,1,5,4)
+        Face3 (J-K-O-N) (1,2,6,5)
+        Face4 (K-L-P-O) (2,3,7,6)
+        Face5 (L-I-M-P) (3,0,4,7)
+        Face6 (M-N-O-P) (4,5,6,7)
+    
+    Return:: Face IDs List.
+    """
+
+    face_ids = []
+
+
+    return np.array(face_ids)
+
+def get_surface_area(mapdl : core.Mapdl, surf : Surface) -> float:
+    """
+    Calculates surface area of surf using "ARFACE(E)" get function.
+    Function returns the area of the face of element E containing 
+    selected nodes.
+    """
+    # Select all surface nodes
+    nlist = mapdl.nsel(_type="S", vmin=surf.nset.items) # type: ignore
+    elist = mapdl.esln(type_='S', ekey='0', nodetype='ALL') # type: ignore
+
+    total_area = 0.0
+    # iterate over elements, find the nodes for each and check whether face nodes in nlist
+    for elem_id in elist:  
+        mapdl.esel(type_='S', item='ELEM', vmin=str(elem_id)) # type: ignore
+        elem_nodes = mapdl.nsle(type_='S', nodetype='ALL')
+        # Find the common nodes between the element nodes and all selected list
+        intersection = list(set(elem_nodes) & set(nlist))
+        if len(intersection) >= 3: # Minimum 3 nodes to define a face
+            with mapdl.non_interactive:
+                mapdl.run(f"_param = ARFACE({elem_id})")
+            area = float(mapdl.parameters["_param"])
+            total_area += area
+
+    mapdl.allsel() # Reset selection after force application
+    return total_area
+
+def _reset_attributes(mapdl : core.Mapdl):
+
+    # Reset Attributes to the defaults
+    mapdl.csys(0)
+    mapdl.real(1)
+    mapdl.mat(1)
+    mapdl.type(1)
+
+
+#################################################################################
+
+def _local_csys(mapdl : core.Mapdl, local_csys : model.LocalCoordinateSystem) -> None:
+    """Creates a local coordinate system in MAPDL."""
+    mapdl.local(kcn=str(local_csys.midx), kcs=local_csys.type, 
+                xc=local_csys.origin[0], yc=local_csys.origin[1], zc=local_csys.origin[2],
+                thxy=str(local_csys.rot_x), thyz=str(local_csys.rot_y), thzx=str(local_csys.rot_z))
+    
+    # reset to default csys
+    mapdl.csys(0)
+
+@prep7
+def _create_pilot_node(mapdl: core.Mapdl, *args):
+
+    pilot_node : model.PilotNode = args[0]
+    
+    mapdl.csys(0)
+    if pilot_node.local_cs:
+        mapdl.csys(pilot_node.local_cs.midx)
+
+    # Create a node
+    pilot_node_number = mapdl.n(x=str(pilot_node.x), y=str(pilot_node.y), z=str(pilot_node.z))
+
+    # Create a component with the name same as pilot node name
+    mapdl.components[pilot_node.nset.name] = "NODE", [pilot_node_number] # type: ignore
+
+def _create_node_set(mapdl : core.Mapdl, nset : Nset):
+    mapdl.components[nset.name] = "NODE", nset.items # type: ignore
+
+def _create_element_set(mapdl : core.Mapdl, elset : Elset):
+    mapdl.components[elset.name] = "ELEM", elset.items # type: ignore
+
+@prep7
+def _create_surface(mapdl : core.Mapdl, *args):
+        
+    surf : model.Surface = args[0]
+
+    # Sets the element coordinate system :: For directional Pressure/Traction
+    if surf.local_csys_id:
+        mapdl.esys(surf.local_csys_id)
+
+    mapdl.type(str(surf.etype.midx)) 
+    mapdl.nsel(type_= 'S', vmin = surf.nset.items) # type: ignore
+    mapdl.esurf()
+
+    mapdl.esys(0) # reset to global CSYS
+    mapdl.type('1') # reset to default element type
+    mapdl.allsel()
 
 @prep7
 def _material(mapdl : core.Mapdl, mat : material.Material) -> None:
@@ -83,40 +209,150 @@ def _assign_material(mapdl : core.Mapdl, elset):
 
     mapdl.emodif(iel=elset.name, stloc="MAT", i1=elset.properties["Material"].midx)
 
-############################
-## GET 
-############################ 
+@prep7
+def _create_element_type(mapdl : core.Mapdl, *args):
+    """Create the element type & Asssign Keyopts"""
+    etype_obj = args[0]
+    mapdl.et(etype_obj.midx, ename=etype_obj.name)
 
-class Get(Enum):
-
-    Max_Node_Number = 1
-    Min_Node_Number = 2
-
-def _get(mapdl : core.Mapdl, set : model.set, value : Get):
-    # *GET, Par, Entity, Item1, IT1NUM, Item2, ITNUM2
-    # mapdl.get(par="", entity="", item1="", it1num="", ...) -> (float, str)
-
-    # Select items
-    if type(set).__name__ == "Nset": # Type check without referencing actual module
-        mapdl.cmsel(type_="S", name=set.name, entity="NODE")
-        if value == Get.Max_Node_Number:
-            num = mapdl.get(par="NMAX", entity="NODE", item1="NUM", it1num="MAX")
-            mapdl.allsel()  # Reset selection before return
-            return int(num)
-        elif value == Get.Min_Node_Number:
-            num = mapdl.get(par="NMAX", entity="NODE", item1="NUM", it1num="MIN")
-            mapdl.allsel()  # Reset selection before return
-            return int(num)
-
-############################
-## CONSTRAINTS
-############################
+    for keyopt in etype_obj.get_keyopts(): # keyopt :: (keyopt_id, value)
+        mapdl.keyopt(itype= str(etype_obj.midx), knum=keyopt[0], value=keyopt[1])
 
 @prep7
-def _coupled_dof(mapdl : core.Mapdl, coupling : constraint.CoupledDOF) -> int:
+def _set_real_constants(mapdl : core.Mapdl, *args):
+    """Gets a real constant object and creates real constants in MAPDL."""
+    
+    rc_obj = args[0][1]
+    real_constants = rc_obj.get_real_constants()
+
+    for idx, rc_group in enumerate(real_constants):
+        if idx == 0:
+            mapdl.r(f"{rc_obj.midx}", # real constant midx
+                    rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
+        else:
+            mapdl.rmore(rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
+    
+def _update_real_constants(mapdl : core.Mapdl, *args):
+    pass
+
+
+#############################################
+#### CONSTRAINTS
+#############################################
+
+## SURFACE BASED CONSTRAINTS ##
+
+@prep7
+def _create_rigid_surface_constraint(mapdl : core.Mapdl, *args):
+        
+    _create_rigid_surface_constraint : constraint.RigidSurfaceConstraint = args[0]
+    contact = _create_rigid_surface_constraint.contact_element_type
+    target = _create_rigid_surface_constraint.target_element_type
+    pilot_node = mapdl.components[_create_rigid_surface_constraint.pilot_node]
+    contact_nodes = mapdl.components[_create_rigid_surface_constraint.contact_nodes]
+
+    # Activate associated real constant and material
+    mapdl.real(str(_create_rigid_surface_constraint.real_constants.midx))
+    mapdl.mat(str(_create_rigid_surface_constraint.material_midx))
+
+    # Local cs
+    if _create_rigid_surface_constraint.local_cs:
+        mapdl.csys(_create_rigid_surface_constraint.local_cs.midx)
+
+    # Create contact elements
+    mapdl.type(str(contact.midx))
+    for node in contact_nodes:
+        mapdl.e(node)
+
+    # Create pilot node element
+    mapdl.type(str(target.midx))
+    # Define target segment elements
+    mapdl.tshap(shape="PILO") 
+    mapdl.e(pilot_node[0])
+    mapdl.tshap()
+
+    _reset_attributes(mapdl)
+    mapdl.allsel()
+
+@prep7
+def _create_force_distirbuted_constraint(mapdl : core.Mapdl, *args):
+    
+    _create_rigid_surface_constraint : constraint.ForceDistributedConstraint = args[0]
+    contact = _create_rigid_surface_constraint.contact_element_type
+    target = _create_rigid_surface_constraint.target_element_type
+    pilot_node = mapdl.components[_create_rigid_surface_constraint.pilot_node]
+    contact_nodes = mapdl.components[_create_rigid_surface_constraint.contact_nodes]
+
+    # First modify real constant fkn, if there is a "user defined" weightening
+    if isinstance(_create_rigid_surface_constraint.weighting_factor, np.ndarray):
+        # For a naming convention get first letters of pilot and contact node set names
+        name = f"{_create_rigid_surface_constraint.pilot_node[:4]}_{_create_rigid_surface_constraint.contact_nodes[:4]}"
+        mapdl.load_table(name=name,
+                         array=_create_rigid_surface_constraint.weighting_factor,
+                         var1="NODE")
+        mapdl.rmodif(nset=str(_create_rigid_surface_constraint.real_constants.midx), stloc=3, v1=f"%{name}%")
+
+    # Activate associated real constant and material
+    mapdl.real(str(_create_rigid_surface_constraint.real_constants.midx))
+    mapdl.mat(str(_create_rigid_surface_constraint.material_midx))
+
+    # Local cs
+    if _create_rigid_surface_constraint.local_cs:
+        mapdl.csys(_create_rigid_surface_constraint.local_cs.midx)
+
+    # Create contact elements
+    mapdl.type(str(contact.midx))
+    for node in contact_nodes:
+        mapdl.e(node)
+
+    # Create pilot node element
+    mapdl.type(str(target.midx))
+    # Define target segment elements
+    mapdl.tshap(shape="PILO") 
+    mapdl.e(pilot_node[0])
+    mapdl.tshap()
+
+    _reset_attributes(mapdl)
+    mapdl.allsel()
+
+@prep7
+def _create_coupled_surface_constraint(mapdl : core.Mapdl, *args):
+
+    mpc_force_dist : constraint.CoupledSurfaceConstraint = args[0]
+    contact = mpc_force_dist.contact_element_type
+    target = mpc_force_dist.target_element_type
+    pilot_node = mapdl.components[mpc_force_dist.pilot_node]
+    contact_nodes = mapdl.components[mpc_force_dist.contact_nodes]
+
+    # Activate associated real constant and material
+    mapdl.real(str(mpc_force_dist.real_constants.midx))
+    mapdl.mat(str(mpc_force_dist.material_midx))
+
+    # Local cs
+    if mpc_force_dist.local_cs:
+        mapdl.csys(mpc_force_dist.local_cs.midx)
+
+    # Create contact elements
+    mapdl.type(str(contact.midx))
+    for node in contact_nodes:
+        mapdl.e(node)
+
+    # Create pilot node element
+    mapdl.type(str(target.midx))
+    # Define target segment elements
+    mapdl.tshap(shape="PILO") 
+    mapdl.e(pilot_node[0])
+    mapdl.tshap()
+
+    _reset_attributes(mapdl)
+    mapdl.allsel()
+
+
+@prep7
+def _coupled_dof(mapdl : core.Mapdl, *args) -> int:
     """Create a dof coupling between nodes and returns primary node number 
     as an integer for coupled set."""
-    
+    coupling : constraint.CoupledDOF = args[0]
     if coupling.dof == "ALL":
         # Using "ALL" directly results new ids for each dof. 
         # So, this method prefered.
@@ -139,8 +375,10 @@ def _coupled_interface(mapdl : core.Mapdl, coupling : constraint.CoupledInterfac
     pass
 
 @prep7                           
-def _MPC184(mapdl : core.Mapdl, mpc) -> None:
+def _MPC184(mapdl : core.Mapdl, *args) -> None:
 
+    mpc = args[0]
+    method = 0
     if mpc.method == "Direct Elimination":
         method = 0
     elif mpc.method == "Lagrange Multiplier":
@@ -155,28 +393,21 @@ def _MPC184(mapdl : core.Mapdl, mpc) -> None:
     
     mapdl.type(mpc.etype.midx)
 
-    for node in mpc.dependent:
-        mapdl.e(node, mpc.independent[0])
-
-#@prep7
-def _create_joint(mapdl : core.Mapdl, model_item_obj : constraint.MPCJoint):
-    
-    print(model_item_obj)
-
-############################
-## MESH
-############################
+    for node in mpc.dependent.items:
+        mapdl.e(node, mpc.independent.items[0])
 
 @prep7
-def _execute_mesh_data(mapdl : core.Mapdl, model_item_obj : Mesh):
+def _create_joint(mapdl : core.Mapdl, *args):
+    model_item_obj : constraint.MPCJoint = args[0]
+    print(model_item_obj)
+
+@prep7
+def _execute_mesh_data(mapdl : core.Mapdl, *args):
     """Reads the mesh model into mapdl session."""
+    model_item_obj : Mesh = args[0]
     arv_file_path = model_item_obj.archieve.pathlib_filename
     if  arv_file_path.exists():
         mapdl.cdread(option="DB", fname=arv_file_path.absolute())
-
-############################
-## LOAD STEP
-############################
 
 output_mapping = {
     "ALL" : "ALL",
@@ -206,11 +437,13 @@ output_mapping = {
     "NODAL-AVG CREEP STRAINS" : "NDCR"
 }
 
-def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
+@solu
+def _load_step(mapdl: core.Mapdl, *args):
+
+    load_step : LoadStep = args[0]
 
     mapdl.allsel() # !!!!
 
-    # Solver Controls 
     # Solver Type
     if load_step.solver_controls.solver_type == "DIRECT":
         mapdl.eqslv(lab="SPARSE")
@@ -228,7 +461,6 @@ def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
 
     # Specify the analysis type and restart status
     if load_step.status == "RESTART":
-        
         mapdl.antype(antype=load_step.analysis,
                     status=load_step.status,
                     ldstep=load_step.step,
@@ -401,20 +633,20 @@ def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
 
     # Force
     for force in load_step.forces:
-        if force[3] == "NEW":
+        if force.operation == "NEW":
             mapdl.fcum(oper="REPL")
-            mapdl.f(node=force[0], lab=f"F{force[1]}", value=force[2])
-        elif force[3] == "ADD":
+            set_force(mapdl, force)
+        elif force.operation == "ADD":
             mapdl.fcum(oper="ADD")
-            mapdl.f(node=force[0], lab=f"F{force[1]}", value=force[2])
-        elif force[3] == "DELETE":
-            if force[4]:
-                mapdl.fdele(node=force[0], lab=f"F{force[1]}", lkey="FIXED")
+            set_force(mapdl, force)
+        elif force.operation == "DELETE":
+            if force.fixed:
+                mapdl.fdele(node=str(force.set), lab=f"F{force.direction}", lkey="FIXED")
             else:
-                mapdl.fdele(node=force[0], lab=f"F{force[1]}")
-    
-    # Moment
+                mapdl.fdele(node=str(force.set), lab=f"F{force.direction}")
+
     for moment in load_step.moments:
+
         if moment[3] == "NEW":
             mapdl.fcum(oper="REPL")
             mapdl.f(node=moment[0], lab=moment[1].replace("R", "M"), value=moment[2])
@@ -427,7 +659,16 @@ def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
             else:
                 mapdl.fdele(node=force[0], lab=f"F{force[1]}")
 
-    # Displacement
+    for pressure in load_step.pressures: 
+        if pressure.operation == "NEW":
+            mapdl.sfcum(lab="PRES", oper="REPL")
+            set_pressure(mapdl, pressure)
+        elif pressure.operation == "ADD":
+            mapdl.sfcum(lab="PRES", oper="ADD")
+            set_pressure(mapdl, pressure)
+        elif pressure.operation == "DELETE":
+            mapdl.sfdele(nlist=str(pressure.surf.nset), lab="PRES")
+            
     for disp in load_step.displacements:
         if disp[3] == "NEW":
             mapdl.dcum(oper="REPL")
@@ -451,16 +692,111 @@ def _load_step(mapdl: core.Mapdl, load_step : loadstep.LoadStep):
             else:
                 mapdl.ddele(node=disp[0], lab=disp[1].replace("R", "ROT"), rkey="OFF")
 
+
+def set_force(mapdl: core.Mapdl, force : Force):
+    if force.applied_by == "NODE SET":
+        nset = mapdl.components[force.set.name] # In case of pilot node assingment with None items!
+        mapdl.nsel(type_='S', vmin=nset) # type: ignore
+        mapdl.f(node="ALL", lab=f"F{force.direction}", value=str(force.value))
+    elif force.applied_by == "ELEMENT FACES":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
+        _sfcontrol(mapdl=mapdl, direction=force.direction, coordinate_system_id=force.local_cs_id, loaded_area="INITIAL")
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
+        _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
+    elif force.applied_by == "SURFACE ELEMENTS":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(force.set.etype.midx)) # type: ignore
+        #mapdl.csys(force.coordinate_system_id)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(force.value))
+
+    mapdl.allsel() # Reset selection after force application
+
+def _sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system_id=None, loaded_area=None, reset=False):
+    """
+    Sets the SFCONTROL parameters for directional pressure/traction application.
+    """
+    kcsys = lcomp = val1 = val2 = val3 = ktaper = kuse = karea = kproj = kfollow = ''
+
+    if reset:
+        with mapdl.non_interactive:
+            mapdl.run(f"SFCONTROL, none") # Reset SFCONTROL
+        return
+
+    if direction == "NORMAL TO":
+        kcsys = "0"
+        lcomp = "0"
+        val1 = "0" # use global CSYS
+    else: # Apply Pressure with component directions
+        kcsys = "1"
+        if direction == "X":
+            lcomp = "0" # X
+        elif direction == "Y":
+            lcomp = "1" # Y     
+        elif direction == "Z":
+            lcomp = "2" # Z
+        #mapdl.csys(coordinate_system_id)
+        val1 = str(coordinate_system_id) # type: ignore
+
+    if loaded_area == "DEFORMED":
+        karea = "0"
+    else:
+        karea = "1" 
+
+    with mapdl.non_interactive:
+        mapdl.run(f"SFCONTROL,{kcsys},{lcomp},{val1},{val2},{val3},{ktaper},{kuse},{karea},{kproj},{kfollow}")
+
+def set_pressure(mapdl: core.Mapdl, pressure : Pressure):
+
+    # Pressure Application Methods ::
+    # 1) Pressure with Node Selection :: SF Command
+    # 2) Pressure with Surface Element Selection :: SFE Command after ESEL
+    # 3) Pressure with Element Faces :: SFE Command
+    if pressure.applied_by == "NODE SET":
+        # Select surface nodes by nset
+        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
+        mapdl.sf(nlist="ALL", lab="PRES", value=str(pressure.value))
+    elif pressure.applied_by == "ELEMENT FACES":
+        # Select surface nodes by nset
+        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
+        # Select element only if all of its nodes are in the selected nodal set
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
+        _sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system_id=pressure.local_cs_id, loaded_area=pressure.loaded_area)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+        _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
+    elif pressure.applied_by == "SURFACE ELEMENTS":
+        # Selecet elements by type id
+        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(pressure.surf.etype.midx)) # type: ignore
+        #mapdl.csys(pressure.coordinate_system_id)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+
+    mapdl.csys(0) # Reset to global CSYS
+    mapdl.allsel() # Reset selection after surface load application
+
 @solu
-def _solve(mapdl: core.Mapdl, solution : model.Solution):  
-    for ls in solution.load_steps:
-        _load_step(mapdl, ls)
-        mapdl.allsel()
-        mapdl.solve()
+def _solve(mapdl: core.Mapdl, *args):  
+
+    """solution : model.Solution = args[0]
+    for ls in solution._load_history:
+        _load_step(mapdl, ls)"""
+
+    mapdl.allsel()
+    mapdl.solve()
     mapdl.save()
+
+def _write_input_file(mapdl: core.Mapdl, *args):
+    mapdl.cdwrite(option="DB", fname="model.cdb")
 
 def _exit_mapdl(mapdl: core.Mapdl, *args):
     mapdl.exit()
+
+def _write_comment(mapdl: core.Mapdl, *args):
+    mapdl.com(comment=args[0]) # type: ignore
 
 
             

@@ -10,6 +10,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from structuralanalysistoolbox import model
+    from structuralanalysistoolbox.mapdl import element
     
 
 class Coupling(Enum):
@@ -95,41 +96,37 @@ class Rigid:
     # Defines a rigid region.
     # CERIG
     dependent : model.Nset
-    independent : model.Node
+    independent : model.Nset
     dof : str
 
-########################
-## MPC184
-########################
+###########################
+## Multi Point Constraints
+###########################
 
 @dataclass
-class MPC184:
+class MPC:
 
+    etype : element.MPC184 | None = None
     midx : int = 0   # model index
-    dependent : model.Nset = None
-    independent : model.Nset = None  
-    etype = None
-    
-#######################
-### MPC184 CONSTRAINTS
-#######################
+    dependent : model.Nset | None = None
+    independent : model.Nset | None = None  
 
 @dataclass
-class MPCRigidLink(MPC184):
+class MPCRigidLink(MPC):
     
     behaviour = 0
     method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Lagrange Multiplier"
     contribution : Literal["Include", "Exlude"] = "Include"
     
 @dataclass
-class MPCRigidBeam(MPC184):
+class MPCRigidBeam(MPC):
     
     behaviour = 1
     method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Lagrange Multiplier"
     contribution : Literal["Include", "Exlude"] = "Include"
     
 @dataclass
-class MPCSlider(MPC184):
+class MPCSlider(MPC):
     
     behaviour = 3
     method : Literal["Lagrange Multiplier", "Penalty-based"] = "Lagrange Multiplier"
@@ -151,7 +148,7 @@ class MPCSlider(MPC184):
     https://ansyshelp.ansys.com/public/account/secured?returnurl=//Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECJOINT.html
 """
 @dataclass
-class MPCJoint(MPC184):
+class MPCJoint(MPC):
 
     material : str = None                           # Join material option on the TB command
     penalty_factors : str = None                    # CHECK SECJOINT DATA

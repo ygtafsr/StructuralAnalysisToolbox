@@ -1,0 +1,167 @@
+
+from __future__ import annotations
+
+import pyvista as pv
+from ansys.mapdl import reader as pymapdl_reader
+from pathlib import Path
+from structuralanalysistoolbox.mapdl import element
+
+import numpy as np
+
+
+"""class Node:
+    def __init__(self, model : model.Model):
+
+        self.id : int
+        self.dof : int
+        self.mapdl = model.mapdl
+
+    def _create_free_node(self):
+        finds max node id, creates a new one with the next number."""
+    
+class Mesh():
+    """
+    Mesh Class to represent Elements and Nodes.
+
+    arhieve class properties:
+    https://reader.docs.pyansys.com/version/stable/user_guide/archive.html
+
+    TODO:
+    - get "rlblock" real constants data and "rlblock_num" indices from the real constants from archive
+    - get "node_angles" from archive
+    - get "element_coord_system()" from archive
+    """
+    def __init__(self, archieve : pymapdl_reader.Archive):
+
+        self.archieve = archieve    # mapdl data
+        self.unstructuredgrid = pv.UnstructuredGrid(archieve.grid)  # pyvista data
+
+        self.nset_dict = archieve.node_components
+        self.elset_dict = archieve.element_components
+
+    def get_mapdl_types(self) -> np.ndarray | None:
+        """
+        Get element types:
+        array([[  1,  45],
+                [  2,  95],
+                [  3,  92],
+                [ 60, 154]], dtype=int32)"""
+
+        return self.archieve.ekey       
+
+    def get_pyvista_types(self):
+        return [pv.CellType(type_no).name for type_no in self.unstructuredgrid.cells_dict.keys()]        
+    
+    def save_as_vtk(self):
+        self.archieve.save("mesh.vtk")
+
+
+        
+def _ansys_mesh(file : str | Path) -> Mesh:
+    """
+    Read a blocked ANSYS archive file or input file.
+    Reads a blocked CDB file and optionally parses it to a vtk grid. 
+    This can be used to read in files written from MAPDL using the CDWRITE command 
+    or input files ('.dat') files written from ANSYS Workbench.
+
+    Write the archive file using CDWRITE, DB, archive.cdb
+
+    At the moment, only solid elements are supported by the save_as_archive function, to include:
+
+    vtk.VTK_TETRA
+    vtk.VTK_QUADRATIC_TETRA
+    vtk.VTK_PYRAMID
+    vtk.VTK_QUADRATIC_PYRAMID
+    vtk.VTK_WEDGE
+    vtk.VTK_QUADRATIC_WEDGE
+    vtk.VTK_HEXAHEDRON
+    vtk.VTK_QUADRATIC_HEXAHEDRON
+
+    Linear element types will be written as SOLID185, quadratic elements will be written as SOLID186,
+    except for quadratic tetrahedrals, which will be written as SOLID187.
+    """
+   
+    if isinstance(file, str):
+        path = Path(file)
+    elif isinstance(file, Path):
+        path = file
+    else: raise TypeError
+
+    if not path.exists(): raise FileNotFoundError
+    
+    arv = pymapdl_reader.Archive(filename=file) # return type: <class 'ansys.mapdl.reader.archive.Archive'>
+                                                # arv.grid type: # <class 'pyvista.core.pointset.UnstructuredGrid'>
+    return Mesh(arv)
+
+"""
+Writing ANSYS Archives
+Unstructured grids generated using VTK can be converted to ANSYS APDL archive files
+and loaded into any version of ANSYS using pymapdl_reader.save_as_archive. The following example 
+using the built-in archive file demonstrates this capability.
+
+import pyvista as pv
+from pyvista import examples
+from ansys.mapdl import reader as pymapdl_reader
+
+# load in a vtk unstructured grid
+grid = pv.UnstructuredGrid(examples.hexbeamfile)
+script_filename = '/tmp/grid.cdb'
+pymapdl_reader.save_as_archive(script_filename, grid)
+
+# optionally read in archive in ANSYS and generate cell shape
+# quality report
+from ansys.mapdl.core import launch_mapdl
+mapdl = launch_mapdl()
+mapdl.cdread('db', script_filename)
+mapdl.prep7()
+mapdl.shpp('SUMM')
+
+------------------------------------------------------------------------------
+           <<<<<<          SHAPE TESTING SUMMARY           >>>>>>
+           <<<<<<        FOR ALL SELECTED ELEMENTS         >>>>>>
+------------------------------------------------------------------------------
+                   --------------------------------------
+                   |  Element count        40 SOLID185  |
+                   --------------------------------------
+
+ Test                Number tested  Warning count  Error count    Warn+Err %
+ ----                -------------  -------------  -----------    ----------
+ Aspect Ratio                 40              0             0         0.00 %
+ Parallel Deviation           40              0             0         0.00 %
+ Maximum Angle                40              0             0         0.00 %
+ Jacobian Ratio               40              0             0         0.00 %
+ Warping Factor               40              0             0         0.00 %
+
+ Any                          40              0             0         0.00 %
+------------------------------------------------------------------------------
+"""
+
+
+
+def _file_validation():
+    """
+    ## Check if the file generated by mapdl
+    ## Check if the file has "ET" attributes
+    """
+    pass
+
+def _regenerate():
+    """
+    ### If file was not generated by mapdl,
+    start a new mapdl session, import file
+    and regenerate (such as Hyperworks generated files)
+
+    ### If file was generated by mapdl import file
+    and components directly by PyMAPDL-Reader
+    """
+    pass
+
+def _export():
+    # pymapdl_reader.save_as_archive("pymapl-generated.cdb", arch.grid)
+    pass
+
+
+
+
+    
+

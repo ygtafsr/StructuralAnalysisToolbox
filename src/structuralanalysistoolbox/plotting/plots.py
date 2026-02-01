@@ -1,18 +1,20 @@
 from __future__ import annotations
 from typing import Literal
 import matplotlib
-matplotlib.use(backend="inline")
+#matplotlib.use(backend="inline")
 import matplotlib.pyplot as plt
 import numpy as np
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from structuralanalysistoolbox.model import Solution
+    from structuralanalysistoolbox.model import Analysis
 
 class LoadStepPlot:
 
-    def __init__(self, solution : Solution, nodes: str, 
-                 load_type : Literal["Force", "Moment", "Displacement"],
+    def __init__(self, 
+                 load_list : np.ndarray, 
+                 nodes: str, 
+                 load_type : Literal["Force", "Moment", "Pressure", "Displacement"],
                  direction: str):
         
         self.fig, self.ax = plt.subplots()
@@ -20,20 +22,12 @@ class LoadStepPlot:
         # Axis
         self.ax.set_title(f"{nodes} load history - {direction}")
         self.ax.set_xlabel("Load Step")
+        self.ax.set_ylabel(f"{load_type} (mm)")
 
-        # Data
-        if load_type == "Force":
-            self.ax.set_ylabel(f"{load_type} (N)")
-            history = solution.get_force_history(nodes=nodes, direction=direction)
-        elif load_type == "Moment":
-            self.ax.set_ylabel(f"{load_type} (Nmm)")
-            history = solution.get_moment_history(nodes=nodes, direction=direction)
-        elif load_type == "Displacement":
-            self.ax.set_ylabel(f"{load_type} (mm)")
-
-        xticks = np.arange(0, len(history), 1)
-        self.ax.plot(xticks, history)
+        xticks = np.arange(0, len(load_list), 1)
+        self.ax.plot(xticks, load_list)
         self.ax.set_xticks(ticks=xticks)
+        self.ax.set_yticks(ticks=load_list)
         self.ax.grid(True)
 
     def plot(self):

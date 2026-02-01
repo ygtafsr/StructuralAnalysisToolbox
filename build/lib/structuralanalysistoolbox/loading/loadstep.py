@@ -1,11 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
-from enum import Enum
 
-from typing import TYPE_CHECKING
+from structuralanalysistoolbox.mapdl import element
+from structuralanalysistoolbox.exceptions import ParameterError
+
+
+from typing import TYPE_CHECKING, overload
+
 if TYPE_CHECKING:
-    from structuralanalysistoolbox.model import Nset, Elset, Solution
+    from structuralanalysistoolbox.model import Nset, Elset, Surface, LocalCoordinateSystem, Vector, Analysis, Model
+
+
 
 """
 NONLINEAR OPTIONS:
@@ -31,23 +37,55 @@ CREATING MULTIPLE LOAD STEPs
 
 """
 
+@dataclass
+class Force:
+    set : Nset | str | Surface
+    value : float
+    direction : Literal["X", "Y", "Z"]
+    local_cs_id : int | None = None
+    applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "NODE SET",
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    fixed : bool = False
+
+@dataclass
+class Moment:
+    nset : Nset | str
+    direction : Literal["RX", "RY", "RZ"]
+    value : float
+    behavior : Literal["Rigid", "Deformable", "Coupled", "Beam"] = "Rigid"
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    fixed : bool = False
+
+@dataclass
+class Pressure:
+    surf : Surface | None
+    value : float
+    local_cs_id : int | None = None
+    direction : Literal["X", "Y", "Z", "NORMAL TO"] = "NORMAL TO"
+    applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "SURFACE ELEMENTS"
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED"
+
+@dataclass
+class Displacement:
+    nodes : Nset | str
+    direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"]
+    value : float
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    ramping : bool = False
+
 class LoadStep:
-    """
-    Load Steps defined in the "solu" processor.
-    KEY COMMANDS:
-    TIME : Time at the end of a load step.
-    KBC : Ramped/Stepped Loading within a load step.
-    DELTIM : Time step size.
-    NSUBST : Number of Substeps within a load step.
-    AUTOTS : Automatic time stepping
-    """
-    def __init__(self, 
-                 step_number : int,
-                 end_time : int, 
+    
+    def __init__(self,
+                 name : str,
+                 model : Model,
+                 step_number : int = 0,
+                 end_time : int = 0, 
                  analysis : Literal["STATIC", "BUCKLE", "MODAL", "HARMIC" ,"TRANS", "SUBSTR"] = "STATIC",
                  status : Literal["NEW", "RESTART"] = "NEW",
                  step : int = 0, substep : int = 0):
         
+        self.model = model
         self.step_number = step_number
         self.analysis = analysis
         self.status = status
@@ -70,26 +108,173 @@ class LoadStep:
         self.violation_monitoring = IterationMonitoring(function="EFLG", characteristics="ON", maxfile=4)
         self.contact_monitoring = IterationMonitoring(function="CONT", characteristics="ITER", maxfile=4)
 
-        self.forces = []
-        self.moments = []
-        self.displacements = []
-        self.outputs = []
+        self.forces : list[Force] = []
+        self.moments : list[Moment] = []
+        self.pressures : list[Pressure] = []
+        self.displacements : list[Displacement] = []
+        self.outputs : list = []
 
-    def force(self, nodes : str | int, direction : Literal["X", "Y", "Z"], value : int ,
-                  operation : Literal["ADD", "NEW", "DELETE"] = "NEW", fixed : bool = False):
-        if direction in ("X", "Y", "Z"):
-            self.forces.append((nodes, direction, value, operation, fixed))
+    def force(self, nset : str | Nset, 
+                    value : int,
+                    direction : Literal["X", "Y", "Z"],
+                    local_cs : LocalCoordinateSystem | None = None,
+                    applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "NODE SET",
+                    operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+                    fixed : bool = False):
+        
+        # Validate the nset:
+        _nset : Nset
+        if isinstance(nset, str) and self.model.get_nset(nset): 
+            _nset = self.model.get_nset(nset) # pyright: ignore[reportAssignmentType]
+        elif isinstance(nset, Nset):
+            _nset = nset
+        else: raise ParameterError(f"Node set '{nset}' does not exist in the model!")
+        
+        if applied_by == "NODE SET":
+            self.forces.append(Force(set=_nset, 
+                                     direction=direction, 
+                                     applied_by=applied_by,
+                                     value=value, 
+                                     operation=operation, 
+                                     fixed=fixed))
+        elif applied_by == "ELEMENT FACES":
+            # Apply through Pressure on Element Faces
+            _surf = self.model.add_surface(nset=_nset.name, name=f"Surf_Force_{_nset.name}", ignore_at_execution=True)
+            _cs_id = 0
+            if direction in ("X", "Y", "Z"):
+                _cs_id = self.model.add_local_csys(origin=(0,0,0), rot_x=0, rot_y=0, rot_z=0).midx # Default CS
 
-    def moment(self, nodes : str | int, direction : Literal["RX", "RY", "RZ"], value : int ,
-                  operation : Literal["ADD", "NEW", "DELETE"] = "NEW", fixed : bool = False):
+            self.forces.append(Force(set=_surf,
+                                     value=value, 
+                                     direction=direction, 
+                                     local_cs_id=_cs_id,
+                                     applied_by=applied_by, 
+                                     operation=operation, 
+                                     fixed=fixed))
+        elif applied_by == "SURFACE ELEMENTS":
+            # Apply through Pressure on Surface Elements
+            _etype_154 = element.Surf154() 
+            _surf = self.model.add_surface(nset=_nset.name, name=f"Surf_Force_{_nset.name}", 
+                                           element_type=_etype_154,
+                                           application="Pressure")
+
+            if direction in ("X", "Y", "Z"):
+                _etype_154.pressure_cs = "LOCAL CS"
+                if local_cs:
+                    _surf.local_csys_id = local_cs.midx
+                else:
+                    _surf.local_csys_id = self.model.add_local_csys(origin=(0,0,0), rot_x=0, rot_y=0, rot_z=0).midx # Default CS
+
+            _etype_154.large_deflection_area = "ORIGINAL AREA"
+            _etype_154.midside_nodes = "INCLUDE"
+
+            self.forces.append(Force(set=_surf,
+                                     value=value, 
+                                     direction=direction, 
+                                     local_cs_id=_surf.local_csys_id, 
+                                     applied_by=applied_by,
+                                     operation=operation, 
+                                     fixed=fixed))
+
+    def moment(self, nset : str | int, 
+                     direction : Literal["RX", "RY", "RZ"], 
+                     value : float,
+                     behavior : Literal["Rigid", "Deformable", "Coupled", "Beam"] = "Rigid",
+                     operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+                     fixed : bool = False):
+        
+        # Create coupling elements if moment is applied to a node set
+        # Use either Rigid, Deformable, Coupled, Beam choices
         if direction in ("RX", "RY", "RZ"):
-            self.moments.append((nodes, direction, value, operation, fixed))
+            self.moments.append((nset, direction, value, operation, fixed))
 
-    def pressure(self):
-        pass
+    def pressure(self, nset : str | Nset, 
+                 value : float, 
+                 direction : Literal["X", "Y", "Z", "NORMAL TO"] = "NORMAL TO",
+                 local_cs : LocalCoordinateSystem | None = None,
+                 applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "SURFACE ELEMENTS",  # Apply through "surface elements"
+                 loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED",                                                                                            # Direct Apply through "element surfaces"   
+                 operation : Literal["ADD", "NEW", "DELETE"] = "NEW"):    # ADD: add to the existing pressure (SFCUM::ADD)
+                                                                          # NEW: overwrite the existing pressure (SFCUM::REPL)
+                                                                          # DELETE: remove the pressure (SFDELE)
+        # Validate the nset:
+        _nset : Nset
+        if isinstance(nset, str) and self.model.get_nset(nset): 
+            _nset = self.model.get_nset(nset) # pyright: ignore[reportAssignmentType]
+        elif isinstance(nset, Nset):
+            _nset = nset
+        else: raise ParameterError(f"Node set '{nset}' does not exist in the model!")
 
-    def dof(self, nodes : str | int, direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"], value : int,
-            operation : Literal["ADD", "NEW", "DELETE"] = "NEW", ramping : bool = False):
+        # Create and store the pressure object
+        _pressure : Pressure
+        if applied_by == "NODE SET":
+            _surf = self.model.add_surface(nset=_nset.name, name=f"Surf_Pres_{_nset.name}", 
+                                           ignore_at_execution=True)
+            _pressure = Pressure(surf=_surf, 
+                                value=value, 
+                                direction="NORMAL TO",
+                                applied_by=applied_by, 
+                                operation=operation, 
+                                loaded_area=loaded_area) # Check this
+            
+        elif applied_by == "ELEMENT FACES":
+            # SFE (through "Element Faces")
+            _surf = self.model.add_surface(nset=_nset.name, name=f"Surf_Pres_{_nset.name}", 
+                                           ignore_at_execution=True)
+            _cs_id = 0
+            if direction in ("X", "Y", "Z"):
+                _cs_id = self.model.add_local_csys(origin=(0,0,0), rot_x=0, rot_y=0, rot_z=0).midx # Default CS
+            
+            _pressure = Pressure(surf=_surf, 
+                                value=value, 
+                                local_cs_id=_cs_id,
+                                direction=direction,
+                                applied_by=applied_by, 
+                                operation=operation, 
+                                loaded_area=loaded_area,)
+            
+        elif applied_by == "SURFACE ELEMENTS": 
+            # SURF154 + SFE (through "Surface Elements")
+            # Create surface elements and specify keyopts
+            _etype_154 = element.Surf154() 
+            _surf = self.model.add_surface(nset=_nset.name, name=f"Surf_Pres_{_nset.name}", 
+                                           element_type=_etype_154,
+                                           application="Pressure")
+
+            if direction == "NORMAL TO":    # keyopt2=0 (use default element CS)
+                _etype_154.pressure_cs = "ELEMENT CS"
+                _etype_154.normal_pressure_direction = "CALCULATED"
+            elif direction in ("X", "Y", "Z"): # keyopt2=1 (use local CS as Element CS)
+                _etype_154.pressure_cs = "LOCAL CS"
+                if local_cs:
+                    _surf.local_csys_id = local_cs.midx
+                else:
+                    _surf.local_csys_id = self.model.add_local_csys(origin=(0,0,0), rot_x=0, rot_y=0, rot_z=0).midx # Default CS
+
+            if loaded_area == "INITIAL":
+                _etype_154.large_deflection_area = "ORIGINAL AREA"
+            else:
+                _etype_154.large_deflection_area = "USE NEW AREA"
+                
+            _etype_154.midside_nodes = "INCLUDE"
+
+            _pressure = Pressure(surf=_surf, 
+                                value=value, 
+                                local_cs_id=_surf.local_csys_id,
+                                direction=direction,
+                                applied_by=applied_by, 
+                                operation=operation, 
+                                loaded_area=loaded_area) # defined in element type
+
+        self.pressures.append(_pressure)
+        
+    def dof(self, 
+            nodes : str | int, 
+            direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"], 
+            value : int,
+            operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+            ramping : bool = False):
+        
         self.displacements.append((nodes, direction, value, operation, ramping))
 
     # Model Changes
@@ -100,6 +285,9 @@ class LoadStep:
         pass    # EKILL
 
     def change_friction(self):
+        pass
+
+    def stabilization(self):
         pass
 
     def output(self, item : Literal["ALL", "BASIC", "ERASE", "NODAL DOF", "REACTION LOADS",

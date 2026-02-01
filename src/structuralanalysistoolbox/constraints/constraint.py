@@ -1,15 +1,33 @@
 
+"""
+GENERAL CONSIDERATIONS ABOUT STBOX ELEMENT DEFINITIONS & IMPLEMENTATIONS
+
+# Sometimes element types, which are defined internally as a result of another implementations
+  such as MPC surface-based constraints, contact elements, are not put into model tree. Their
+  properties (keyopts, real constants etc) can be editted within actual implementation object.
+
+# Element types object attributes with a default value as 'None' skipped implementing keyopts and
+  real constants.
+
+"""
+
+
+
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import Literal, overload
 from abc import abstractmethod
+import numpy as np
 
 #from structuralanalysistoolbox.mapdl.mesh import ElementType
+from structuralanalysistoolbox.mapdl import element
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from structuralanalysistoolbox import model
+    from structuralanalysistoolbox.materials.material import Material
     
 
 class Coupling(Enum):
@@ -95,41 +113,37 @@ class Rigid:
     # Defines a rigid region.
     # CERIG
     dependent : model.Nset
-    independent : model.Node
+    independent : model.Nset
     dof : str
 
-########################
-## MPC184
-########################
+###########################
+## Multi Point Constraints
+###########################
 
 @dataclass
-class MPC184:
+class MPC:
 
+    etype : element.MPC184 | None = None
     midx : int = 0   # model index
-    dependent : model.Nset = None
-    independent : model.Nset = None  
-    etype = None
-    
-#######################
-### MPC184 CONSTRAINTS
-#######################
+    dependent : model.Nset | None = None
+    independent : model.Nset | None = None  
 
 @dataclass
-class MPCRigidLink(MPC184):
+class MPCRigidLink(MPC):
     
     behaviour = 0
     method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Lagrange Multiplier"
     contribution : Literal["Include", "Exlude"] = "Include"
     
 @dataclass
-class MPCRigidBeam(MPC184):
+class MPCRigidBeam(MPC):
     
     behaviour = 1
     method : Literal["Direct Elimination", "Lagrange Multiplier"] = "Lagrange Multiplier"
     contribution : Literal["Include", "Exlude"] = "Include"
     
 @dataclass
-class MPCSlider(MPC184):
+class MPCSlider(MPC):
     
     behaviour = 3
     method : Literal["Lagrange Multiplier", "Penalty-based"] = "Lagrange Multiplier"
@@ -151,7 +165,7 @@ class MPCSlider(MPC184):
     https://ansyshelp.ansys.com/public/account/secured?returnurl=//Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECJOINT.html
 """
 @dataclass
-class MPCJoint(MPC184):
+class MPCJoint(MPC):
 
     material : str = None                           # Join material option on the TB command
     penalty_factors : str = None                    # CHECK SECJOINT DATA
@@ -312,34 +326,189 @@ class GenbJoint(MPCJoint):
     section_sub_type = "GENB"
 
 
-#######################
-## Surface Based MPC
-#######################
-
+##############################
+## Surface Based Constraints
+##############################
 
 @dataclass
-class MPCRigidSurface:
+class RigidSurfaceConstraint:
     """
     Rigid Surface Constraint
-    (Similar to CERIG/RBE2)
-    """
-    dependent : model.Nset
-    independent : model.Nset
+    Constrained Surface Remains Rigid
+    (Similar to CERIG)
+
+    * Rigid surface constraint can be based on either MPC approach (keopt2 = 2)
+      or Lagrange multiplier method (keyopt2 = 3)
+
+    * The pilot node is an independent(retained) node. The contact nodes are the
+      dependent (removed) nodes. Do not apply additional constraints to the dependent nodes.
+    """  
+    pilot_node : str
+
+    contact_nodes : str
+
+    midx : int = 0   # model index
+
+    constrained_dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ")
+
+    contact_algorithm : Literal["MPC", "Lagrange & Penalty"] = "MPC"
+
+    contact_model : Literal["Surface-To-Surface",
+                            "Node-To-Surface"] = "Node-To-Surface"
+
+    local_cs : model.LocalCoordinateSystem | None = None
+
+    bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
+
+    material_midx : int = 0
+
+    contact_element_type : element.Conta172 | element.Conta174 | element.Conta175 | element.Conta177 | None = None
+
+    target_element_type : element.Targe169 | element.Targe170 | None = None
+
+    real_constants : element.ContaRealConstants | None = None
+
+    def __post_init__(self):
+        """Create underlying contact and target element objects"""
+        # Post-Correction :: 
+        if self.contact_algorithm == "Lagrange": self.contact_algorithm = "Lagrange & Penalty"
+
+        if self.contact_model == "Node-To-Surface":
+            self.contact_element_type = element.Conta175(contact_algorithm=self.contact_algorithm,
+                                                        surface_based_constraint = "Rigid Surface",
+                                                        behaviour=self.bonding_type)
+        
+            self.target_element_type = element.Targe170(dof=self.constrained_dof, 
+                                                        bc_for_rigid_target_nodes="User Definition")
+        elif self.contact_model == "Surface-To-Surface":
+            pass
 
 @dataclass
-class MPCDistributed:
+class ForceDistributedConstraint:
     """
-    Force-Distributed Constraint
-    (Similar to RBE3)
-    """   
+      Force-Distributed Constraint (Similar to RBE3)
+
+    * Force-distributed surface constraint can be based on either MPC approach (keopt2 = 2)
+      or Lagrange multiplier method (keyopt2 = 3) 
+
+    * Pilot node is a dependent node (meaning the degrees of freedom for this node are removed)
+      The contact nodes are independent nodes (the degrees of freedom are retained).
+      If the pilot node has constraints applied to it, internally-generated MPC equations are
+      rewritten so that the degrees of freedom of the pilot node are no longer dependant DOF.
+
+    * By default, the program computes weighting factors automatically by summing the contact area
+      of each contact node.
+      !!! When you set keyopt7 = 1 on the target element (targe169 and targe170), the program uses
+      a constant weighting factor of 1.0 for each contact node. (Similar to default behaviour of RBE3)
+    """  
+    pilot_node : str
+
+    contact_nodes : str
+
+    midx : int = 0   # model index
+
+    constrained_dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ")
+
+    contact_algorithm : Literal["MPC", "Lagrange & Penalty"] = "MPC"
+
+    contact_model : Literal["Surface-To-Surface",
+                            "Node-To-Surface"] = "Node-To-Surface"
+
+    weighting_factor : np.ndarray | None = None 
+
+    local_cs : model.LocalCoordinateSystem | None = None
+
+    bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
+
+    material_midx : int = 0
+
+    constrained_surface_symmetry : Literal["Pilot XY Plane",
+                                            "Pilot XZ Plane",
+                                            "Pilot YZ Plane",
+                                            "Pilot XY + XZ",
+                                            "Pilot XY + YZ",
+                                            "Pilot XZ + YZ"] | None = None 
+    
+    """stress_stiffening_effect : Literal["Include", "Not Include"] = "Include" # Target keyopt10 only if contact keyopt2 = mpc
+
+    relaxion_method : Literal["Include", "Not Include"] = "Include" # Target keyopt11 only if contact keyopt2 = mpc"""
+
+    contact_element_type : element.Conta172 | element.Conta174 | element.Conta175 | element.Conta177 | None = None
+
+    target_element_type : element.Targe169 | element.Targe170 | None = None
+
+    real_constants : element.ContaRealConstants | None = None
+
+    """@property
+    def stress_stiffening_effect(self):
+        return self._stress_stiffening_effect
+    
+    @stress_stiffening_effect.setter
+    def stress_stiffening_effect(self, value : Literal["Include", "Not Include"] = "Include"):"""
+
+
+    def __post_init__(self):
+        """Create underlying contact and target element objects"""
+        # Post-Correction :: 
+        if self.contact_algorithm == "Lagrange": self.contact_algorithm = "Lagrange & Penalty"
+
+        if self.contact_model == "Node-To-Surface":
+            self.contact_element_type = element.Conta175(contact_algorithm=self.contact_algorithm,
+                                                        surface_based_constraint = "Force Distribution",
+                                                        behaviour=self.bonding_type)
+        
+            self.target_element_type = element.Targe170(dof=self.constrained_dof, 
+                                                        constrained_surface_symmetry=self.constrained_surface_symmetry,
+                                                        bc_for_rigid_target_nodes="User Definition")
+        elif self.contact_model == "Surface-To-Surface":
+            pass
+
+        
 
 @dataclass
-class MPCCoupling:
+class CoupledSurfaceConstraint:
     """
     Coupling Constraint
     (Similar to CP)
     """
-    pass
+    pilot_node : str
+
+    contact_nodes : str
+
+    midx : int = 0   # model index
+
+    constrained_dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ")
+
+    contact_model : Literal["Surface-To-Surface",
+                            "Node-To-Surface"] = "Node-To-Surface"
+
+    local_cs : model.LocalCoordinateSystem | None = None
+
+    bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
+
+    material_midx : int = 0
+
+    contact_element_type : element.Conta172 | element.Conta174 | element.Conta175 | element.Conta177 | None = None
+
+    target_element_type : element.Targe169 | element.Targe170 | None = None
+
+    real_constants : element.ContaRealConstants | None = None
+
+    def __post_init__(self):
+        """Create underlying contact and target element objects"""
+
+        if self.contact_model == "Node-To-Surface":
+            self.contact_element_type = element.Conta175(contact_algorithm= "MPC",
+                                                        surface_based_constraint = "Coupling",
+                                                        behaviour=self.bonding_type)
+        
+            self.target_element_type = element.Targe170(dof=self.constrained_dof, 
+                                                        bc_for_rigid_target_nodes="User Definition")
+        elif self.contact_model == "Surface-To-Surface":
+            pass
+
+
+
 
 @dataclass
 class MPCRigidBody:

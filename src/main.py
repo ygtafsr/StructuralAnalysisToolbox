@@ -1,8 +1,5 @@
 
 import structuralanalysistoolbox as stbox
-from pathlib import Path
-from ansys.mapdl import reader as pymapdl_reader
-from ansys.mapdl.reader import examples
 
 
 def _add_material():
@@ -27,39 +24,34 @@ def _add_material():
     
 def main():
 
-    model = stbox.Model(name="my-model", interactive=False)
-    model.import_mesh(r'src\rod.cdb')
+    model = stbox.Model(name="my-model")
+    model.import_mesh(r'C:\Users\yigit\StructuralAnalysisToolbox\examples\meshes\cantilevier_beam.cdb')
+    model.add_material("Linear Steel", "MESH")
 
-    mat = model.add_material(mat="My Steel")
-    model.assign_material("MESH", mat)
+    model.add_pilot_node("Force_Node", -15, 50 ,-300)
 
-    model.add_MPC_Rigid(dependent="NS_LOAD_DEPEN", independent="NS_LOAD")
+    load_step_1 = model.add_loadstep(name="LS-1")
+    load_step_1.remote_force("Force_Node", "LOADING_NODES_2", -5000, "Y")
+    load_step_1.dof("NS_FIX", 0, "ALL")
+    load_step_1.output("ALL")
+
+    load_step_2 = model.add_loadstep(name="LS-2")
+    load_step_2.remote_force("Force_Node", "LOADING_NODES_2", 3000, "Y", operation="ADD")
+    load_step_1.dof("NS_FIX", 0, "ALL")
+    load_step_2.output("ALL")
+
+    load_step_3 = model.add_loadstep(name="LS-3")
+    load_step_2.remote_force("Force_Node", "LOADING_NODES_2", 3000, "Y", operation="NEW")
+    load_step_1.dof("NS_FIX", 0, "ALL")
+    load_step_3.output("ALL")
+
+    model.plot_load_history("Force_Node", "Force", "Y")
+
     model.info()
 
-    load_step_1 = model.add_load_step()
-
-    load_step_1.force("NS_LOAD", "X", 8000)
-    load_step_1.dof("NS_FIX", "ALL", 0)
-
-    load_step_1.output("NODAL DOF", "ALL")
-    load_step_1.output("REACTION LOADS", "ALL")
-    load_step_1.output("NODAL-AVG PLASTIC STRAINS", "ALL")
-    load_step_1.output("NODAL-AVG STRESSES", "ALL")
-
-    load_step_2 = model.add_load_step()
-    load_step_2.force("NS_LOAD", "X", -2000, operation="ADD")
-
-    load_step_3 = model.add_load_step()
-    load_step_3.force("NS_LOAD", "Y", 5000)
-
-    load_step_4 = model.add_load_step()
-    load_step_4.force("NS_LOAD", "X", 5000)
-  
-    
-
-    model.plot_load("NS_LOAD", "Force", "X")
+    model.write_input_file()
     #model.solve()
-    pass
+
 
 if __name__ == "__main__":
     main()
