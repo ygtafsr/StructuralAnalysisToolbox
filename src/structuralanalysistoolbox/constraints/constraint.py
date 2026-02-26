@@ -22,7 +22,7 @@ from abc import abstractmethod
 import numpy as np
 
 #from structuralanalysistoolbox.mapdl.mesh import ElementType
-from structuralanalysistoolbox.mapdl import element
+from structuralanalysistoolbox.mapdl import element, attributes
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ class MPCJoint(MPC):
     material : str = None                           # Join material option on the TB command
     penalty_factors : str = None                    # CHECK SECJOINT DATA
     bc : str = None                                 # DJ or FJ boundary conditions
-    local_cs : model.LocalCoordinateSystem = None   # SECJOINT DATA
+    local_cs : model.CoordinateSystem = None   # SECJOINT DATA
     stop : list = None                              # SECSTOP (Stops or limits)
     lock : list = None                              # SECLOCK
     method : Literal["Lagrange Multiplier", "Penalty-Based"] = "Lagrange Multiplier"
@@ -356,7 +356,7 @@ class RigidSurfaceConstraint:
     contact_model : Literal["Surface-To-Surface",
                             "Node-To-Surface"] = "Node-To-Surface"
 
-    local_cs : model.LocalCoordinateSystem | None = None
+    local_cs : model.CoordinateSystem | None = None
 
     bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
 
@@ -416,11 +416,11 @@ class ForceDistributedConstraint:
 
     weighting_factor : np.ndarray | None = None 
 
-    local_cs : model.LocalCoordinateSystem | None = None
+    coordinate_system : model.CoordinateSystem | None = None
 
     bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
 
-    material_midx : int = 0
+    material : attributes.Mat | None = None
 
     constrained_surface_symmetry : Literal["Pilot XY Plane",
                                             "Pilot XZ Plane",
@@ -437,7 +437,7 @@ class ForceDistributedConstraint:
 
     target_element_type : element.Targe169 | element.Targe170 | None = None
 
-    real_constants : element.ContaRealConstants | None = None
+    real_constants : attributes.Real | None = None
 
     """@property
     def stress_stiffening_effect(self):
@@ -454,8 +454,8 @@ class ForceDistributedConstraint:
 
         if self.contact_model == "Node-To-Surface":
             self.contact_element_type = element.Conta175(contact_algorithm=self.contact_algorithm,
-                                                        surface_based_constraint = "Force Distribution",
-                                                        behaviour=self.bonding_type)
+                                                         surface_based_constraint = "Force Distribution",
+                                                         behaviour=self.bonding_type)
         
             self.target_element_type = element.Targe170(dof=self.constrained_dof, 
                                                         constrained_surface_symmetry=self.constrained_surface_symmetry,
@@ -482,7 +482,7 @@ class CoupledSurfaceConstraint:
     contact_model : Literal["Surface-To-Surface",
                             "Node-To-Surface"] = "Node-To-Surface"
 
-    local_cs : model.LocalCoordinateSystem | None = None
+    local_cs : model.CoordinateSystem | None = None
 
     bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)"
 

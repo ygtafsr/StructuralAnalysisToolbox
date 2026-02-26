@@ -1,6 +1,6 @@
 # Structural Analysis Toolbox (stbox)
 
-The main target of the library is creating an easy to follow structural analysis (solid mechanics) modelling workflow and implementation with a solver (mapdl). It provides a high-level implementation of apdl commands through PyMAPDL. 
+The main target of the library is creating an easy to follow structural analysis (solid mechanics) modelling workflow and implementation with a solver (mapdl). It provides a high-level, non-interactive implementation of apdl commands through PyMAPDL. 
 
 ## Key Features
 

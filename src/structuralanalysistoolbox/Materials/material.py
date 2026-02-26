@@ -2,7 +2,10 @@
 from enum import Enum
 from dataclasses import dataclass, asdict, field
 import numpy as np
+
 from . import matlib
+from structuralanalysistoolbox.mapdl.attributes import Mat
+
 
 class MaterialModelCategory(Enum):
     PHYSICAL = 1
@@ -68,12 +71,11 @@ class StrainLife:
     cyclic_strength_coefficient : float = None
     cyclic_strength_hardening_exponent : float = None
 
-class Material:
+class Material(Mat):
 
     def __init__(self, name, category = '', remarks = '', source = '', last_update = ''):
         
         # material labels
-        self.midx : int = 0
         self.name : str  = name   # MATERIAL NAME MUST BE UNIQUE!
         self.category : str  = category
         self.remarks : str  = remarks

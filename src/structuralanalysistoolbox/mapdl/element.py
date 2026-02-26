@@ -1,24 +1,11 @@
 
+from structuralanalysistoolbox.mapdl.attributes import Etype, Real, Section, Mat
+
 from dataclasses import dataclass, fields
 from typing import Literal
 
 
-@dataclass
-class EType:
-    midx : int = 0  # Element type index (Same as in solver)
-    ignore_at_execution = False
-
-    def __repr__(self) -> str:
-        cls = self.__class__.__name__
-        lines = [f"{cls}("]
-        # include dataclass fields
-        for f in fields(self):
-            value = getattr(self, f.name)
-            lines.append(f"  {f.name} = {value!r},")
-        lines.append(")")
-        return "\n".join(lines)
-
-SURF185_KEYOPT_MAPPING = {
+SOLID185_KEYOPT_MAPPING = {
     2 : ("technology", ("FULL INTEGRATION", "REDUCED INTEGRATION", "ENHANCED STRAIN", "SIMPLIFIED ENHANCED STRAIN")),
     3 : ("layer", ("LAYERED", "HOMOGENEOUS")),
     6 : ("formulation", ("PURE DISPLACEMENT", "MIXED UP")),
@@ -28,10 +15,10 @@ SURF185_KEYOPT_MAPPING = {
 }
 
 @dataclass
-class Solid185(EType):
+class Solid185(Etype):
     """8-Node Structural Solid"""
 
-    name = "SOLID185"
+    name : str = "SOLID185"
 
     technology : Literal["FULL INTEGRATION",
                          "REDUCED INTEGRATION",
@@ -56,34 +43,34 @@ class Solid185(EType):
     def get_keyopts(self) -> tuple: # ((keyopt_number, keyopt_value), ...)
         """Returns a tuple of keyopt number and corresponding value based on the current attribute settings."""
 
-        return ((2 ,SURF185_KEYOPT_MAPPING[2][1].index(self.technology)),
-                (3, SURF185_KEYOPT_MAPPING[3][1].index(self.layering)),
-                (6, SURF185_KEYOPT_MAPPING[6][1].index(self.formulation)),
-                (15, SURF185_KEYOPT_MAPPING[15][1].index(self.pml_absorbing)),
-                (16, SURF185_KEYOPT_MAPPING[16][1].index(self.steady_state)),
-                (17, SURF185_KEYOPT_MAPPING[17][1].index(self.extra_surface_output)))
+        return ((2 ,SOLID185_KEYOPT_MAPPING[2][1].index(self.technology)),
+                (3, SOLID185_KEYOPT_MAPPING[3][1].index(self.layering)),
+                (6, SOLID185_KEYOPT_MAPPING[6][1].index(self.formulation)),
+                (15, SOLID185_KEYOPT_MAPPING[15][1].index(self.pml_absorbing)),
+                (16, SOLID185_KEYOPT_MAPPING[16][1].index(self.steady_state)),
+                (17, SOLID185_KEYOPT_MAPPING[17][1].index(self.extra_surface_output)))
 
     def set_keyopt(self, keyopt_number: int, value: str):
         """Sets the attribute corresponding to the keyopt_number to the given value."""
 
         # raise error if keyopt_number is invalid
-        if keyopt_number not in SURF185_KEYOPT_MAPPING:
+        if keyopt_number not in SOLID185_KEYOPT_MAPPING:
             raise ValueError(f"Invalid keyopt number: {keyopt_number}")
         # raise error if value is invalid
-        if value not in SURF185_KEYOPT_MAPPING[keyopt_number][1]:
+        if value not in SOLID185_KEYOPT_MAPPING[keyopt_number][1]:
             raise ValueError(f"Invalid value for keyopt {keyopt_number}: {value}")  
         # set the attribute
-        setattr(self, SURF185_KEYOPT_MAPPING[keyopt_number][0], 
-                      SURF185_KEYOPT_MAPPING[keyopt_number][1][value])
+        setattr(self, SOLID185_KEYOPT_MAPPING[keyopt_number][0], 
+                      SOLID185_KEYOPT_MAPPING[keyopt_number][1][value])
 
     def __repr__(self):
         return super().__repr__()
 
 @dataclass
-class Solid186:
+class Solid186(Etype):
     """20-Node Structural Solid"""
 
-    name = "SOLID186"
+    name : str = "SOLID186"
 
     technology : Literal["FULL INTEGRATION",
                          "REDUCED INTEGRATION"] = "REDUCED INTEGRATION"
@@ -108,9 +95,10 @@ class Solid186:
         return super().__repr__()
     
 @dataclass
-class Solid187:
+class Solid187(Etype):
 
-    name = "SOLID187"
+    name : str = "SOLID187"
+
     formulation : Literal["PURE DISPLACEMENT",
                           "MIXED UP"] = "MIXED UP"
     
@@ -127,9 +115,10 @@ class Solid187:
         return super().__repr__()
 
 @dataclass
-class Solid285:
+class Solid285(Etype):
 
-    name = "SOLID285"
+    name : str = "SOLID285"
+
     formulation : Literal["PURE DISPLACEMENT",
                           "MIXED UP WITH CONSTANT PRESSURE",
                           "MIXED UP WITH LINEAR PRESSURE"] = "PURE DISPLACEMENT"
@@ -146,9 +135,9 @@ class Solid285:
         return super().__repr__()
 
 @dataclass
-class Plane182:
+class Plane182(Etype):
 
-    name = "PLANE182"
+    name : str = "PLANE182"
 
     technology : Literal["FULL INTEGRATION",
                          "REDUCED INTEGRATION",
@@ -178,9 +167,9 @@ class Plane182:
         return super().__repr__()
 
 @dataclass
-class Plane183:
+class Plane183(Etype):
 
-    name = "PLANE183"
+    name : str = "PLANE183"
 
     shape : Literal["QUAD 8",
                     "TRIA 6"] = "QUAD 8"
@@ -208,9 +197,15 @@ class Plane183:
 ### Surface Effect Elements
 ##################################
 
-class Surf153:
+@dataclass
+class Surf153(Etype):
     """2-D Structural Surface Effect"""
+    name : str = "SURF153"
     pass
+
+#####################
+## SURF154 & INPUTS
+#####################
 
 SURF154_KEYOPT_MAPPING = {
     "pressure_cs": (2, ("ELEMENT CS", "LOCAL CS")),
@@ -224,10 +219,33 @@ SURF154_KEYOPT_MAPPING = {
     "effect_of_direction": (12, ("PRESSURE APPLIED", "PRESSURE SUPPRESSED"))
 }
 
-class Surf154(EType):
+@dataclass
+class Surf154RealConstants(Real):
+
+    efs : float | str = ''  # Foundation stiffness
+    surt : float | str = '' # Surface Tension
+    admsua : float | str = ''   # Added mass/unit area
+    tki : float | str = ''  # Thickness at node i (defaults to tki)
+    tkj : float | str = ''  # Thickness at node j (defaults to tki)
+    tkk : float | str = ''  # Thickness at node k (defaults to tki)
+    tkl : float | str = ''  # Thickness at node l (defaults to tki)
+
+    def get_real_constants(self) -> tuple:
+        """Create a 8x6 tuple of real constants for CONTA174 element."""
+        return ((self.efs, self.surt, self.admsua, self.tki, self.tkj, self.tkk),
+                (self.tkl, "", "", "", "", ""))
+
+@dataclass
+class Surf154Material(Mat):
+    dens : float = 0.0
+    visc : float = 0.0
+
+@dataclass
+class Surf154(Etype):
     """3-D Structural Surface Effect"""
-    name = "SURF154"
-    pressure_cs : Literal["ELEMENT CS", "LOCAL CS"] = "ELEMENT CS"
+    name : str = "SURF154"
+
+    pressure_cs : Literal["ELEMENT CS", "LOCAL CS"] = "ELEMENT CS" # Element cs follows large deflection effects
     midside_nodes : Literal["INCLUDE", "EXCLUDE"] = "INCLUDE"
     normal_pressure_direction : Literal["CALCULATED", "POSITIVE ONLY", "NEGATIVE ONLY"] | None = None
     large_deflection_area : Literal["USE NEW AREA", "ORIGINAL AREA"] = "USE NEW AREA"
@@ -250,9 +268,9 @@ class Surf154(EType):
     def __repr__(self):
         return super().__repr__()
 
-##################################
-### MPC184
-##################################
+#####################
+### MPC184 & INPUTS
+#####################
 
 MPC184_KEYOPT_MAPPING = {
     1 : ("behaviour", ("RigidLink", "RigidBeam", "Slider", "Revolute", "Universal", "Slot", "Point", "Translational", "Cylindrical", "Planar", "Weld", "Orient", "Spherical", "General", "Screw")),
@@ -260,9 +278,11 @@ MPC184_KEYOPT_MAPPING = {
     3 : ("configuration", ("x-axis revolute", "y-axis revolute", "displacement and rotational", "only displacement")),
     5 : ("stress_stiffness", ("Include", "Exclude"))}
 
-class MPC184(EType):
+@dataclass
+class MPC184(Etype):
     
-    name = "MPC184"
+    name : str = "MPC184"
+
     behaviour : int = 0
     method : Literal["Direct Elimination", "Lagrange Multiplier", "Penalty Based Method"] = "Lagrange Multiplier"
     contribution : Literal["Include", "Exclude"] = "Include"
@@ -279,9 +299,9 @@ class MPC184(EType):
 ### CONTACT and TARGET Elements
 ##################################
 @dataclass
-class ContaRealConstants:
+class ContaRealConstants(Real):
     """REAL CONSTANTS for CONTA174 element."""
-    midx : int = 0
+
     r1 : float | str = ''  # Target radius for cylinder, cone, or sphere
     r2 : float | str = ''  # Target radius at second node of cone
     fkn : float | str = '' # Normal penalty stiffness factor / weightenin factor for MPC_RBE3
@@ -325,9 +345,16 @@ class ContaRealConstants:
                 ('', '', '', '', '', ''),
                 ('', '', self.bsrl, self.ksym, self.tfor, self.tend))
 
-class Conta172:
+@dataclass
+class Conta172(Etype):
     "2-D 3-Node Surface-to-Surface Contact"
+    name : str = 'CONTA172'
+
     pass
+
+#####################
+## CONTA174 & INPUTS
+#####################
 
 CONTA174_KEYOPT_MAPPING = {
     "dof" : (1, ("UX UY UZ", 0), ("UX UY UZ TEMP", 1), ("UX UY UZ PRES", 8), ("UX UY UZ PRES TEMP", 9)),
@@ -351,9 +378,14 @@ CONTA174_KEYOPT_MAPPING = {
 }
 
 @dataclass
-class Conta174(EType):
+class Conta174Material(Mat):
+    mu_1 : float = 0.2
+    mu_2 : float = 0.0
+
+@dataclass
+class Conta174(Etype):
     "3-D 8-Node Surface-to-Surface Contact"
-    name = "CONTA174"
+    name : str = "CONTA174"
 
     dof : Literal["UX UY UZ",
                   "UX UY UZ TEMP",
@@ -456,7 +488,11 @@ class Conta174(EType):
                 _keyopt_val = next(val[1] for val in CONTA174_KEYOPT_MAPPING[key][1:] if key == val[0])
                 keyopts.append((_keyopt_id, _keyopt_val))
         return keyopts or None
-            
+
+#####################
+## CONTA175 & INPUTS
+#####################
+
 CONTA175_KEYOPT_MAPPING = {
     "dof" : (1, ("UX UY UZ", 0), ("UX UY UZ TEMP", 1), ("UX UY UZ PRES", 8), ("UX UY UZ PRES TEMP", 9)),
     "contact_algorithm" : (2, ("Augmented Lagrange", 0), ("Penalty", 1), ("MPC", 2), ("Lagrange & Penalty", 3), ("Lagrange", 4)),
@@ -478,7 +514,12 @@ CONTA175_KEYOPT_MAPPING = {
 }
 
 @dataclass
-class Conta175(EType):
+class Conta175Material(Mat):
+    mu_1 : float = 0.2
+    mu_2 : float = 0.0
+
+@dataclass
+class Conta175(Etype):
     """
     2-D/3-D Node-to-Surface Contact
     EXAMPLE :: 
@@ -487,7 +528,7 @@ class Conta175(EType):
     keyo,cid,2,2               ! MPC style contact (MPC)
     """
 
-    name = "CONTA175"
+    name : str = "CONTA175"
 
     dof : Literal["UX UY UZ", # Default
                   "UX UY UZ TEMP",
@@ -586,11 +627,20 @@ class Conta175(EType):
                 keyopts.append((_keyopt_id, _keyopt_val))
         return keyopts or None
 
-class Conta177:
-    "3-D Line-to-Surface Contact"
-    pass
+#####################
+## CONTA177 & INPUTS
+#####################
 
-class Targe169:
+@dataclass
+class Conta177(Etype):
+    "3-D Line-to-Surface Contact"
+    name : str = 'CONTA177'
+
+
+@dataclass
+class Targe169(Etype):
+
+    name : str = 'TARGE169'
     pass
 
 TARGE170_KEYOPT_MAPPING = {
@@ -607,14 +657,14 @@ TARGE170_KEYOPT_MAPPING = {
 }
 
 @dataclass
-class Targe170(EType):
+class Targe170(Etype):
     """
     EXAMPLE
     keyo,tid,2,1               ! Don't fix the pilot node (User Definition) ????
     keyo,tid,4,0               ! Activate all DOF's due to large deformation (0 actives all!!!)
     """
 
-    name = "TARGE170"
+    name : str = "TARGE170"
 
     element_order : Literal["Low Order", "High Order"] = "Low Order" #K1
 
@@ -684,16 +734,6 @@ class Targe170(EType):
 ########################################################
 ### SECTION Definitons for the elements with two points
 ########################################################
-
-@dataclass
-class SectionType:
-    """
-    SECTYPE, SECID, Type, Subtype, Name, REFINEKEY
-    Associates section type information with a section ID number.
-    https://ansyshelp.ansys.com/public/account/secured?returnurl=///Views/Secured/corp/v242/en/ans_cmd/Hlp_C_SECTYPE.html
-    """
-    id : int
-    type : Literal[""]
 
 @dataclass
 class SectionData:

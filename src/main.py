@@ -28,29 +28,30 @@ def main():
     model.import_mesh(r'C:\Users\yigit\StructuralAnalysisToolbox\examples\meshes\cantilevier_beam.cdb')
     model.add_material("Linear Steel", "MESH")
 
-    model.add_pilot_node("Force_Node", -15, 50 ,-300)
+    model.add_pilot_node(name="Force_Node", x=-15, y=50 ,z=-300)
+    model.add_pilot_node(name="Fixed", x=0, y=0, z=0)
+
+    model.add_force_dist_surf_constraint(pilot_node="Force_Node", contact_nodes="LOADING_NODES")
+    model.add_force_dist_surf_constraint(pilot_node="Fixed", contact_nodes="NS_FIX")
 
     load_step_1 = model.add_loadstep(name="LS-1")
-    load_step_1.remote_force("Force_Node", "LOADING_NODES_2", -5000, "Y")
-    load_step_1.dof("NS_FIX", 0, "ALL")
+    load_step_1.force("Force_Node", -5000, "Y")
+    load_step_1.force("Force_Node", 8000, "X")
+    load_step_1.displacement("Fixed", 0, "ALL")
     load_step_1.output("ALL")
+    load_step_1.restart(frequency="LAST")
 
     load_step_2 = model.add_loadstep(name="LS-2")
-    load_step_2.remote_force("Force_Node", "LOADING_NODES_2", 3000, "Y", operation="ADD")
-    load_step_1.dof("NS_FIX", 0, "ALL")
+    load_step_2.pressure("LOADING_NODES_2", 100, "Y")
+    load_step_2.force("Force_Node", 4000, "Y", operation="ADD")
     load_step_2.output("ALL")
 
-    load_step_3 = model.add_loadstep(name="LS-3")
-    load_step_2.remote_force("Force_Node", "LOADING_NODES_2", 3000, "Y", operation="NEW")
-    load_step_1.dof("NS_FIX", 0, "ALL")
-    load_step_3.output("ALL")
+    load_step_2.force("Force_Node", 8000, "Y", operation="ADD")
 
+    model.bc_history()
     model.plot_load_history("Force_Node", "Force", "Y")
 
-    model.info()
-
-    model.write_input_file()
-    #model.solve()
+    pass
 
 
 if __name__ == "__main__":

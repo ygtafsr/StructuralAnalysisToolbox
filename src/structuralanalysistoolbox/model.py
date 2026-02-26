@@ -3,23 +3,41 @@ from __future__ import annotations
 import ansys.mapdl.core as core
 from ansys.mapdl.core import launch_mapdl
 from dataclasses import dataclass, field
-from typing import Literal, overload
-from enum import Enum
+from typing import Literal, overload, Dict, List, Any
 from pathlib import Path
 import numpy as np
 import time
 from datetime import datetime
-from typing import Dict, List, Any
+
+import pandas as pd
 
 from structuralanalysistoolbox.data import mesh
 from structuralanalysistoolbox.materials import material 
 from structuralanalysistoolbox.materials.material import Material
 from structuralanalysistoolbox.constraints import constraint, contact
-from structuralanalysistoolbox.mapdl import command, element
-from structuralanalysistoolbox.loading.loadstep import LoadStep
+from structuralanalysistoolbox.mapdl import command, element, attributes
+from structuralanalysistoolbox.loading.loadstep import LoadStep, Force, Moment, Pressure, Displacement
 from structuralanalysistoolbox.plotting.plots import LoadStepPlot
 from structuralanalysistoolbox.visualization.meshplotter import Plotter
 from structuralanalysistoolbox.exceptions import ParameterError
+
+
+"""
+[1] An 'Add_' method adds ONLY corresponding model item to the tree.
+    For example, add_surface only add surface not the internal element types etc.
+    add_mpc_constraint do not adds surfaces and element types.
+
+[2] Assigning Attributes::
+
+    [User] :: Through element sets
+    [Me] :: Set attirbutes inside any model item implementation
+
+[3] Restart Analysis:
+    Solve method looks up model._load_step_list starting from the last loadstep to
+    find out the load step with a restart option and only run this loadstep.
+
+
+"""
 
 
 @dataclass
@@ -31,47 +49,46 @@ class Nset:
 
 @dataclass
 class Elset:
-    name : str
-    items : np.ndarray | list
-    midx = 0
-    properties : Dict[str, Material | None] = field(
-        default_factory=lambda : {"Material" : None})
+    name : str | None = None
+    items : np.ndarray | list | None = None
+    element_type : attributes.Etype | None = None
+    real_constants : attributes.Real | None = None
+    material : attributes.Mat | None = None
+    element_cs : int | None = None
+    section : attributes.Section | None = None
     ignore_at_execution = False
-
-    def __str__(self):
-        return (
-            f"Id: {self.midx}\n" 
-            f"Elements: {self.items}")
+    show_in_model_tree = True
 
 @dataclass
 class Surface:
     """
-    A surface consist of Nset and Elset
-    1- Nset: defines the nodes on the surface
-    2- Elset: defines the elements on the surface (For pressure -> element surface)
-    3- EType: defines the element type of the surface elements
+    Nset: defines the nodes on the surface
+    EType: defines the element type of the surface elements
     """
-    # This can be "Surface Elements" or "Element Faces"
     # There could be more than 1 (2) surface defined for the same nset. (Shell Elements)
     # !! But their etype ids must be different!!
     # Thus, distinguish them with etype id.
     nset : Nset | None = None
-    etype : element.EType | None = None 
-    name : str = ""
-    midx : int = 0
-    application : Literal["Pressure", "Contact"] = "Pressure"
-    local_csys_id : int | None = None
+    name : str | None = None
+    type : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES"
+
+    element_type : attributes.Etype | None = None
+    real_constants : attributes.Real | None = None
+    material : attributes.Mat | None = None
+    csys : CoordinateSystem | None = None
+
     ignore_at_execution : bool = False
     
 @dataclass
-class LocalCoordinateSystem:
-    midx : int = 10
+class CoordinateSystem:
+    midx : int = 0
     type = "Cartesian"
     origin : tuple = (0.0, 0.0, 0.0)
     rot_x : float = 0.0
     rot_y : float = 0.0
     rot_z : float = 0.0
     ignore_at_execution : bool = False
+    show_in_model_tree = True
 
 @dataclass
 class PilotNode:
@@ -82,15 +99,114 @@ class PilotNode:
     x : float
     y : float
     z : float
-    local_cs : LocalCoordinateSystem | None = None
+    local_cs : CoordinateSystem | None = None
 
 @dataclass
 class Vector:
     midx : int
 
 class Analysis:
-    pass    
+    
+    def __init__(self, model):
 
+        self.model : Model = model
+        self.ls_table : List[List[Force | Pressure | Moment | Displacement | None]] = []
+
+        """
+          LS-1    LS-2    LS-3
+        [ None,   None,   None ...]
+        [ None,   None,   None ...]
+         .
+         .
+         .
+        """
+
+    def add_new_row(self):
+        """Add new row full of 'None' up to new load step."""
+        current_loadstep = len(self.model._load_step_list)
+        self.ls_table.append([None for i in range(0, current_loadstep)])
+        pass
+
+    def add_new_column(self):
+        for row in self.ls_table:
+            row.append(None)
+        pass
+
+    def check_columns(self, bc : Force | Moment | Pressure | Displacement) -> tuple[int, int] | None:
+        for row_idx, row in enumerate(self.ls_table):
+            for col_idx, cell in enumerate(row):
+                if cell == bc:
+                    return (row_idx, col_idx)
+        return None
+
+    def add_bc(self, bc : Force | Moment | Pressure | Displacement):
+        """ 
+        Adds a bc to the last load step. If there is a same scope for bc which is
+        already defined, then add the bc this row. Otherwise, adds a new scope row.
+        """
+        # Get bc scope and check its existence in ls_table
+        # If it exist then add bc end of the ls list of this scope line.
+        # Else, add_new_scope + add add bc end of the ls list of this scope line.
+        # Add a new bc object in any case that the bc is a continuation of a previous one or not.
+        # Continuity check is only important to decide using a new scope or a previous one.
+
+        current_loadstep = len(self.model._load_step_list)
+
+        if current_loadstep == 1:
+            self.add_new_row()
+            self.ls_table[-1][-1] = bc
+        else:
+            if item := self.check_columns(bc):
+                self.ls_table[item[0]][current_loadstep-1] = bc 
+            else:
+                self.add_new_row()
+                self.ls_table[-1][-1] = bc
+        pass
+
+    def get_bc_history(self) -> pd.DataFrame:
+
+        def _bc_to_str(bc_obj: Force | Moment | Pressure | Displacement | None) -> str | None:
+            if bc_obj is None:
+                return None
+            if type(bc_obj) is Force:
+                scope = bc_obj.set.name
+                kind = "FORCE"
+            elif type(bc_obj) is Moment:
+                scope = bc_obj.set.name
+                kind = "MOMENT"
+            elif type(bc_obj) is Pressure:
+                scope = bc_obj.set.nset.name
+                kind = "PRESS"
+            elif type(bc_obj) is Displacement:
+                scope = bc_obj.set.name
+                kind = "DISP"
+            else:
+                scope = ""
+                kind = type(bc_obj).__name__.upper()
+            return f"{bc_obj.direction} : {bc_obj.value}"
+
+        if not self.ls_table:
+            return pd.DataFrame()
+
+        num_cols = max(len(row) for row in self.ls_table)
+        columns = [f"LS-{ls_no+1}" for ls_no in range(num_cols)]
+
+        data = []
+        index = []
+        for row_idx, row in enumerate(self.ls_table, start=1):
+            padded = list(row) + [None] * (num_cols - len(row))
+            data.append([_bc_to_str(cell) for cell in padded])
+
+            first = next((cell for cell in padded if cell is not None), None)
+            if first is None:
+                index.append(f"SCOPE-{row_idx}")
+            elif type(first) is Pressure:
+                index.append(f"PRESS : {first.set.nset.name}")
+            else:
+                index.append(f"{type(first).__name__.upper()} : {first.set.name}")
+
+        return pd.DataFrame(data=data, columns=columns, index=index)
+       
 class Model:
 
     def __init__(self, name = '',
@@ -103,18 +219,23 @@ class Model:
         self.cpus = cpus
         self.work_folder = work_folder
 
-        self._analysis = Analysis()
+        self._analysis = Analysis(self)
 
         self._solution = None
 
         self._command_pipeline = []
 
         # Attribute Lists
-        self._material_list = []
         self._element_type_list = []
         self._real_constants_list = []
-        self._local_cs_list = []
+        self._material_list = []
+        self._cs_list = []
         self._section_list = []
+
+        # Assign attributes within Elset
+        # Some elsets do not show up in the model tree
+        self._element_set_list = []
+        self._surface_list = []
 
         # Load Step List
         self._load_step_list : List[LoadStep] = []
@@ -125,9 +246,10 @@ class Model:
                                    "Materials" : {},
                                    "Sets" : {"Node Sets" : {}, 
                                              "Element Sets": {}
+                                           # "Surfaces" : {}
                                             },
-                                   "Surfaces" : {},
-                                   "Local Coordinate Systems" : {},
+                                   
+                                   "Coordinate Systems" : {},
                                    "Sections" : {},
                                    "Constraints" : {"Linear Couplings" : {},
                                                     "Constraint Equations" : {},
@@ -142,10 +264,10 @@ class Model:
         if work_folder == '':
             _current_path = Path.cwd()
             timestamp = datetime.now().strftime("%d.%m.%Y-%H.%M.%S")
-            self.creation_time = time.time()
             folder_name = f"{name}-{timestamp}"
-            self.working_directory = _current_path / folder_name
-            self.working_directory.mkdir()
+            self.working_dir = _current_path / folder_name
+            self.working_dir.mkdir()
+            self.target_dir = self.working_dir # For possible restart files movement
 
 #####################
 ## IMPORT/EXPORT
@@ -172,24 +294,19 @@ class Model:
         for name, elist in self.mesh.elset_dict.items():
             self.add_element_set(name, elist, ignore_at_execution=True)
 
-        # Create element types
-        # TODO:
-        # Define "KeyOpts"
-        # Create "Real Constants" after import,
+        # Get element attributes and specify in the model
+        # Element Types:
         etypes = self.mesh.get_mapdl_types() # [(etype, etype_idx) ...]
         if etypes is not None:
-            for item in etypes:
-                # item[0] -> type id
-                # item[1] -> type
-                # Create element type object from structuralanalysistoolbox.mapdl.element
-                etype = element.VALID_ETYPES[item[1]]()   
-                etype.midx = item[0]
-                etype.ignore_at_execution=True
-                self._add_attribute("Type", etype, etype.midx)
-                self._model_definitions["Element Types"][etype.name] = etype
-
-        # Map solver command:
-        #self._add_command("_execute_mesh_data", self.mesh)
+            for item in etypes: # item[0]::type id // item[1]::type
+                etype = element.VALID_ETYPES[item[1]]()  
+                self.add_element_type(etype, item[0], ignore_at_execution=True) 
+            #self._add_attribute(attributes.Mat(ignore_at_execution=True), midx=1) # Mat(1)
+            self._add_attribute(attributes.Real(ignore_at_execution=True), midx=1) # Real(1)
+            self._add_attribute(attributes.Section(ignore_at_execution=True), midx=1) # Sec(1)
+            self.add_coordinate_system(name="Cartesian", id=0, ignore_at_execution=True)
+            self.add_coordinate_system(name="Cylindrical", id=1, ignore_at_execution=True)
+            self.add_coordinate_system(name="Spherical", id=2, ignore_at_execution=True)
 
     def export_model(self, fileName : str):
         """Exports file in blocked format"""
@@ -200,6 +317,21 @@ class Model:
 ## ATTRIBUTES
 #####################    
 
+    def add_element_type(self, etype : element.Etype, midx : int | None = None, **kwargs):
+        """Adds 3D, Shell, 2D, 1D, 0D Elements to the model & Model Tree"""
+        # 3D, Shell, 2D, 1D, 0D Elements are shown in the model tree
+        # Others that are internally created are not shown in the model three
+        # they are take place in model._element_type_list
+        if midx: 
+            self._add_attribute(etype, midx)
+        else:
+            etype.midx = self._add_attribute(etype)
+
+        self._model_definitions["Element Types"][etype.name] = etype
+
+        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
+            etype.ignore_at_execution = kwargs["ignore_at_execution"]
+        
     def add_material(self, mat : str | Material , elset : str) -> Material:
         """Adds a material to the model tree and assing to an elset."""
         
@@ -210,43 +342,117 @@ class Model:
         if isinstance(mat, str):
             mat = material.load(mat_name=mat)
             # Add to both attribute list & model tree
-            mat.midx = self._add_attribute(attribute_type="Mat", attribute=mat)
+            mat.midx = self._add_attribute(mat)
             self._model_definitions["Materials"][mat.name] = mat
         elif isinstance(mat, Material):
             # Add to both attribute list & model tree
-            mat.midx = self._add_attribute(attribute_type="Mat", attribute=mat)
+            mat.midx = self._add_attribute(mat)
             self._model_definitions["Materials"][mat.name] = mat
         else: raise ValueError("mat value type is not str or Material")
 
         # Assign a material to an Elset
         if isinstance(elset_obj, Elset): 
-            elset_obj.properties["Material"] = mat
+            elset_obj.material = mat
 
         return mat
 
-    def add_coordinate_system(self, name : str = '',
-                       origin : tuple = (0.0, 0.0, 0.0), 
-                       rot_x : float = 0.0, rot_y : float = 0.0, rot_z : float = 0.0, **kwargs) -> LocalCoordinateSystem:
-        """Adds a local coordinate system to the model."""
-        csys = LocalCoordinateSystem(origin=origin, rot_x=rot_x, rot_y=rot_y, rot_z=rot_z)
+    def assign_attribute(self, elset : str | Elset, attribute : attributes.Etype | 
+                                                                attributes.Real | 
+                                                                attributes.Section |
+                                                                CoordinateSystem):
 
-        if len(self._local_cs_list) == 0:
-            csys.midx = 11
+        elset_ : Elset
+        if isinstance(elset, Elset):
+            elset_ = elset
+        elif isinstance(elset, str) and self.get_elset(elset):
+            elset_ = self.get_elset(elset)
+
+        if isinstance(attribute, attributes.Etype):
+            elset_.element_type = attribute
+        elif isinstance(attribute, attributes.Real):
+            elset_.real_constants = attribute
+        elif isinstance(attribute, attributes.Section):
+            elset_.section = attribute
+        elif isinstance(attribute, CoordinateSystem):
+            elset_.element_cs = attribute
+
+    def add_coordinate_system(self, 
+                              name : str = '',
+                              origin : tuple = (0.0, 0.0, 0.0), 
+                              rot_x : float = 0.0, rot_y : float = 0.0, rot_z : float = 0.0, **kwargs) -> CoordinateSystem:
+        """Adds a coordinate system to the model."""
+        csys = CoordinateSystem(origin=origin, rot_x=rot_x, rot_y=rot_y, rot_z=rot_z)
+
+        if "id" in kwargs.keys(): # It's a global solver coordinate system
+            csys.midx = kwargs["id"]
         else:
-            csys.midx = self._add_attribute("Csys", csys)
-            
+            if max(cs.midx for cs in self._cs_list) < 11: # Start from 11 for a local cs id
+                csys.midx = 11
+            else:
+                csys.midx = self._add_attribute(csys)
+        
+        if "ignore_at_execution" in kwargs.keys(): # ignore_at_execution
+            csys.ignore_at_execution = kwargs["ignore_at_execution"]
+
         # Add a name for the model tree
         if name == '': name = f"CSYS-{csys.midx}"
 
-        self._model_definitions["Local Coordinate Systems"][name] = csys
+        self._cs_list.append(csys)
 
-        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
-            csys.ignore_at_execution = True
+        if "show_in_model_tree" in kwargs.keys():
+            if kwargs["show_in_model_tree"]:
+                self._model_definitions["Coordinate Systems"][name] = csys
+        else:
+            self._model_definitions["Coordinate Systems"][name] = csys
 
         return csys
+    
+    def get_coordinate_system(self, name : str) -> CoordinateSystem | None:
+        ''' Returns cs object from model tree'''
+        for cs_name in self._model_definitions["Coordinate Systems"].keys():
+            if cs_name == name:
+                return self._model_definitions["Coordinate Systems"][cs_name]
+            else: return None
 
     def add_unit_vector(self):
         pass
+
+    def _add_attribute(self, attribute : attributes.Attribute | CoordinateSystem, midx : int | None = None) -> int:
+        """
+        Adds attribute to the corresponding attribute list
+        Assigns its midx
+        An empty attribute can be add as a placeholder in the form of (id, None)
+        Returns attribute id
+        """
+ 
+        att_list = None
+        if isinstance(attribute, attributes.Mat):
+            att_list = self._material_list
+        elif isinstance(attribute, attributes.Etype):
+            att_list = self._element_type_list
+        elif isinstance(attribute, attributes.Real):
+            att_list = self._real_constants_list
+        elif isinstance(attribute, CoordinateSystem):
+            att_list = self._cs_list
+        elif isinstance(attribute, attributes.Section):
+            att_list = self._section_list
+
+        def find_max_attribute_id() -> int:
+            if not att_list:
+                """if isinstance(attribute, CoordinateSystem):
+                # Skip default attribute ids for mapdl
+                    return 0 
+                else: return 1"""
+                return 0
+            else: return max(att.midx for att in att_list)
+
+        if midx is not None:
+            attribute.midx = midx
+        else:
+            attribute.midx = find_max_attribute_id() + 1
+
+        att_list.append(attribute)
+        return attribute.midx
 
 #####################
 ## SETS
@@ -258,52 +464,30 @@ class Model:
         
         nset = Nset(name, nodes)
 
-        nset.midx = self._find_max_id(self._model_definitions["Sets"]["Node Sets"]) + 1
+        nset.midx = self._find_max_tree_item_id(self._model_definitions["Sets"]["Node Sets"]) + 1
         self._model_definitions["Sets"]["Node Sets"][nset.name] = nset
 
-        if kwargs: # ignore_at_execution
-            nset.ignore_at_execution = kwargs.get("ignore_at_execution", False)
+        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
+            nset.ignore_at_execution = kwargs["ignore_at_execution"]
 
         return nset
 
     def add_element_set(self, name : str, elements : np.ndarray | list, **kwargs) -> Elset:
-        if name is None:
+        """Adds Element Set to the Model & Model Tree"""
+        if name == '':
             raise ParameterError("Element set name must be defined!")
         
         elset = Elset(name, elements)
-        elset.midx = self._find_max_id(self._model_definitions["Sets"]["Element Sets"]) + 1
+
+        #self._element_set_list.append(elset)
         self._model_definitions["Sets"]["Element Sets"][elset.name] = elset
 
-        if kwargs: # ignore_at_execution
-            elset.ignore_at_execution = kwargs.get("ignore_at_execution", False)
+        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
+            elset.ignore_at_execution = kwargs["ignore_at_execution"]
 
         return elset
 
-    def add_surface(self, nset : str, name : str | None = None, 
-                    element_type : Any | None = None,
-                    application : Literal["Pressure", "Contact"] = "Pressure",
-                    local_csys_id : int | None = None,
-                    **kwargs) -> Surface:
-        """Create a surface object through given Nset, return surface reference"""
-
-        if name is None:
-            raise ParameterError("Surface name must be defined!")
-
-        surf = Surface(nset=self.get_nset(nset), name=name, application=application, local_csys_id=local_csys_id)
-        surf.midx = self._find_max_id(self._model_definitions["Surfaces"]) + 1
-
-        if element_type is not None:
-            self.add_element_type(element_type)
-            surf.etype = element_type
-
-        self._model_definitions["Surfaces"][surf.name] = surf
-
-        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
-            surf.ignore_at_execution = True
-
-        return surf
-
-    def add_pilot_node(self, name : str, x : float, y : float, z : float, local_cs : LocalCoordinateSystem | None = None) -> PilotNode:
+    def add_pilot_node(self, name : str, x : float, y : float, z : float, local_cs : CoordinateSystem | None = None) -> PilotNode:
 
         nset = self.add_node_set(name=name, nodes=None, ignore_at_execution=True)
         pilot_node = PilotNode(nset=nset, x=x, y=y, z=z, local_cs=local_cs)
@@ -321,10 +505,48 @@ class Model:
             return self._model_definitions["Sets"]["Element Sets"][name]
         else: return None
 
-    def get_surface(self, name : str) -> Surface | None:
-        if name in self._model_definitions["Sets"]["Surfaces"]:
-            return self._model_definitions["Sets"]["Surfaces"][name]
-        else: return None
+    def _add_surface(self, nset : str, 
+                     name : str | None = None, 
+                     surface_type : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES",
+                     etype : attributes.Etype | None = None,
+                     real_constants : attributes.Real | None = None,
+                     material : attributes.Mat | None = None,
+                     coordinate_system : CoordinateSystem | None = None,
+                     **kwargs) -> Surface:
+        """Create a surface object through given Nset, return surface reference"""
+        
+        surf = Surface(self.get_nset(nset), name, surface_type)
+        self._surface_list.append(surf)
+
+        if surface_type == "SURFACE ELEMENTS":
+
+            self._add_attribute(etype)
+            self._add_attribute(real_constants)
+            self._add_attribute(material)
+            
+            surf.element_type = etype
+            surf.real_constants = real_constants
+            surf.material = material
+            surf.csys = coordinate_system
+
+        if kwargs and kwargs["ignore_at_execution"]: # ignore_at_execution
+            surf.ignore_at_execution = kwargs["ignore_at_execution"]
+
+        return surf
+
+    def _get_surface(self, nset : str, type : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"]) -> Surface | None:
+
+        _nset = self.get_nset(nset)
+        if _nset:
+            for surf in self._surface_list:
+                if set(surf.nset.items) == set(_nset.items) and type == surf.type:
+                    return surf
+                else: return None
+        else: ParameterError(f"Node set '{_nset}' does not exist in the model!")
+
+        """if _nset in self._surface_list:
+            return self._model_definitions["Sets"]["Surfaces"][_nset]
+        else: return None"""
 
 #####################
 ## CONSTRAINTS
@@ -344,15 +566,14 @@ class Model:
              "ALL" or
              ("UX", "UY", "ROTX", ..)
         """
-        # Get nset object
-        nset_obj = self._get_item_object(group="sets", item=nset)
-        min_node_num = _get_min_node(nset_obj) # For non-interactive sessions
+
+        nset_obj = self.get_nset(nset)
 
         # create a dof-coupling obj
         coupling_obj = constraint.CoupledDOF(nset=nset_obj, dof=dof)
 
         if "couplings" in self._model_definitions:
-            id = self._find_max_id("couplings") + 1
+            id = self._find_max_tree_item_id("couplings") + 1
         else: 
             self._model_definitions["couplings"] = {}
             id = 1
@@ -368,42 +589,46 @@ class Model:
     def add_MPC_rigid_beam_web(self):
         pass
 
-    def add_force_dist_surf_constraint(self, pilot_node : str, contact_nodes : str,
-                     dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"),
-                     weight : Literal["Contact Area", "RBE3"] | np.ndarray = "Contact Area",
-                     contact_model : Literal["Surface-To-Surface", "Node-To-Surface"] = "Node-To-Surface",
-                     contact_algorithm : Literal["MPC", "Lagrange"] = "MPC",
-                     local_cs : LocalCoordinateSystem | None = None,
-                     bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)",
-                     symmetry : Literal["Pilot XY Plane",
-                                        "Pilot XZ Plane",
-                                        "Pilot YZ Plane",
-                                        "Pilot XY + XZ",
-                                        "Pilot XY + YZ",
-                                        "Pilot XZ + YZ"] | None = None) -> constraint.ForceDistributedConstraint:
+    def add_force_dist_surf_constraint(self, 
+                                       pilot_node : str, contact_nodes : str,
+                                       dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"),
+                                       weight : Literal["Contact Area", "RBE3"] | np.ndarray = "Contact Area",
+                                       contact_model : Literal["Surface-To-Surface", "Node-To-Surface"] = "Node-To-Surface",
+                                       contact_algorithm : Literal["MPC", "Lagrange"] = "MPC",
+                                       local_cs : CoordinateSystem | None = None,
+                                       bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)",
+                                       symmetry : Literal["Pilot XY Plane",
+                                                          "Pilot XZ Plane",
+                                                          "Pilot YZ Plane",
+                                                          "Pilot XY + XZ",
+                                                          "Pilot XY + YZ",
+                                                          "Pilot XZ + YZ"] | None = None) -> constraint.ForceDistributedConstraint:
         """MPC Deformable Surface
         * Weighting factor can be specified in the form of np.ndarray[node_id, weight] or 1, or None for internal
         * 
-        
         """
+        cs : CoordinateSystem
+        if not local_cs:
+            cs = self.get_coordinate_system("Cartesian")
+        else: cs = local_cs
+
         mpc = constraint.ForceDistributedConstraint(pilot_node=pilot_node, contact_nodes=contact_nodes,
-                                             constrained_dof=dof,
-                                             contact_model=contact_model,
-                                             contact_algorithm=contact_algorithm,
-                                             local_cs=local_cs,
-                                             bonding_type=bonding_type,
-                                             constrained_surface_symmetry=symmetry)
-        
-        # Add internally generated contact elements to the model
-        mpc.contact_element_type.midx = self._add_attribute("Type", mpc.contact_element_type)
-        mpc.target_element_type.midx = self._add_attribute("Type", mpc.target_element_type)
+                                                    constrained_dof=dof,
+                                                    contact_model=contact_model,
+                                                    contact_algorithm=contact_algorithm,
+                                                    coordinate_system=cs,
+                                                    bonding_type=bonding_type,
+                                                    constrained_surface_symmetry=symmetry)
 
+        # Add target and contact element types to the model
+        self._add_attribute(mpc.contact_element_type)
+        self._add_attribute(mpc.target_element_type)
         # Create an empty material attribute
-        mpc.material_midx = self._add_attribute(attribute_type="Mat", attribute=None)
-
-        # Create and Associate the Real Constant Object
-        mpc.real_constants = element.ContaRealConstants()
-        mpc.real_constants.midx = self._add_attribute(attribute_type="Real" ,attribute=mpc.real_constants)
+        mpc.material = attributes.Mat(ignore_at_execution=True)
+        self._add_attribute(mpc.material)
+        # Create an empty Real Constant attribute
+        mpc.real_constants = attributes.Real(ignore_at_execution=True)
+        self._add_attribute(mpc.real_constants)
 
         # Define weighten logic
         if weight == "RBE3":
@@ -416,7 +641,7 @@ class Model:
             mpc.target_element_type.weighting_factor = "User Defined"
             # modify real constant fkn after Elements created
         
-        mpc.midx = self._find_max_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
+        mpc.midx = self._find_max_tree_item_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
         self._model_definitions["Constraints"]["Surface-Based"][f"Force-Dist Surface-{mpc.midx} ({contact_algorithm})"] = mpc
         return mpc
 
@@ -424,7 +649,7 @@ class Model:
                      dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"),
                      contact_model : Literal["Surface-To-Surface", "Node-To-Surface"] = "Node-To-Surface",
                      contact_algorithm : Literal["MPC", "Lagrange"] = "MPC",
-                     local_cs : LocalCoordinateSystem | None = None,
+                     local_cs : CoordinateSystem | None = None,
                      bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)") -> constraint.RigidSurfaceConstraint:
 
         mpc = constraint.RigidSurfaceConstraint(pilot_node=pilot_node, contact_nodes=contact_nodes,
@@ -435,24 +660,24 @@ class Model:
                                              bonding_type=bonding_type)
         
         # Add internally generated contact elements to the model
-        mpc.contact_element_type.midx = self._add_attribute("Type", mpc.contact_element_type)
-        mpc.target_element_type.midx = self._add_attribute("Type", mpc.target_element_type)
+        mpc.contact_element_type.midx = self._add_attribute(mpc.contact_element_type)
+        mpc.target_element_type.midx = self._add_attribute(mpc.target_element_type)
 
         # Create an empty material attribute
-        mpc.material_midx = self._add_attribute(attribute_type="Mat", attribute=None)
+        mpc.material_midx = self._add_attribute(attributes.Mat())
 
         # Create and Associate the Real Constant Object
         mpc.real_constants = element.ContaRealConstants()
-        mpc.real_constants.midx = self._add_attribute(attribute_type="Real" ,attribute=mpc.real_constants)
+        mpc.real_constants.midx = self._add_attribute(mpc.real_constants)
         
-        mpc.midx = self._find_max_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
+        mpc.midx = self._find_max_tree_item_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
         self._model_definitions["Constraints"]["Surface-Based"][f"Rigid Surface-{mpc.midx} ({contact_algorithm})"] = mpc
         return mpc
 
     def add_coupled_surface_constraint(self, pilot_node : str, contact_nodes : str,
                      dof : tuple = ("UX", "UY", "UZ", "ROTX", "ROTY", "ROTZ"),
                      contact_model : Literal["Surface-To-Surface", "Node-To-Surface"] = "Node-To-Surface",
-                     local_cs : LocalCoordinateSystem | None = None,
+                     local_cs : CoordinateSystem | None = None,
                      bonding_type : Literal["Bonded (always)", "Bonded (initial)"] = "Bonded (always)") -> constraint.CoupledSurfaceConstraint:
 
         mpc = constraint.CoupledSurfaceConstraint(pilot_node=pilot_node, contact_nodes=contact_nodes,
@@ -462,17 +687,17 @@ class Model:
                                              bonding_type=bonding_type)
         
         # Add internally generated contact elements to the model
-        mpc.contact_element_type.midx = self._add_attribute("Type", mpc.contact_element_type)
-        mpc.target_element_type.midx = self._add_attribute("Type", mpc.target_element_type)
+        mpc.contact_element_type.midx = self._add_attribute(mpc.contact_element_type)
+        mpc.target_element_type.midx = self._add_attribute(mpc.target_element_type)
 
         # Create an empty material attribute
-        mpc.material_midx = self._add_attribute(attribute_type="Mat", attribute=None)
+        mpc.material_midx = self._add_attribute(attributes.Mat())
 
         # Create and Associate the Real Constant Object
         mpc.real_constants = element.ContaRealConstants()
-        mpc.real_constants.midx = self._add_attribute(attribute_type="Real" ,attribute=mpc.real_constants)
+        mpc.real_constants.midx = self._add_attribute(mpc.real_constants)
         
-        mpc.midx = self._find_max_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
+        mpc.midx = self._find_max_tree_item_id(self._model_definitions["Constraints"]["Surface-Based"]) + 1
         self._model_definitions["Constraints"]["Surface-Based"][f"Coupled Surface-{mpc.midx} (MPC)"] = mpc
         return mpc
 
@@ -511,22 +736,35 @@ class Model:
 ## LOAD STEP
 #####################
 
+    @overload
     def add_loadstep(self, 
                      name : str,
-                     analysis : Literal["STATIC", "BUCKLE", "MODAL", "HARMIC" ,"TRANS", "SUBSTR"] = "STATIC",
-                     status : Literal["NEW", "RESTART"] = "NEW",
+                     analysis  = "STATIC",
+                     status  = "NEW") -> LoadStep: ...
+    @overload
+    def add_loadstep(self, 
+                     name : str,
+                     analysis = "STATIC",
+                     status = "RESTART",
+                     step : int = 0, substep : int = 0) -> LoadStep: ...
+    def add_loadstep(self, 
+                     name : str,
+                     analysis : Literal["STATIC", "BUCKLE", "MODAL", "HARMIC" ,"TRANS", "SUBSTR"] | Any = "STATIC",
+                     status : Literal["NEW", "RESTART"] | Any = "NEW",
                      step : int = 0, substep : int = 0) -> LoadStep:
         
         ls = LoadStep(name=name,
                       model=self,
+                      step_number=len(self._load_step_list) + 1,
                       end_time = 1,
-                      analysis=analysis, status=status, step=step, substep=substep)
+                      analysis_type=analysis)
         
         self._load_step_list.append(ls)
 
-        ls.step_number = self._find_max_id(self._model_definitions["Load Steps"]) + 1
-        self._model_definitions["Load Steps"][name] = ls
-        #self._solution._add_loadstep(ls)        
+        ls.step_number = self._find_max_tree_item_id(self._model_definitions["Load Steps"]) + 1
+        self._model_definitions["Load Steps"][name] = ls   
+
+        self._analysis.add_new_column()     
 
         return ls
 
@@ -566,7 +804,7 @@ class Model:
                         history.append(moment)
             elif load_type == "Pressure":
                 for pressure in  ls.pressures:
-                    if pressure.surf.nset.name == nset and pressure.direction == direction:
+                    if pressure.set.nset.name == nset and pressure.direction == direction:
                         history.append(pressure)
             elif load_type == "Displacement":
                 for displacement in  ls.displacements:
@@ -588,6 +826,9 @@ class Model:
         ls_plot = LoadStepPlot(load_list, nodes=nset, load_type=load_type, direction=direction)
         ls_plot.plot()
 
+    def bc_history(self) -> pd.DataFrame:
+        return self._analysis.get_bc_history()
+
 #####################
 ## MISC.
 #####################
@@ -604,64 +845,7 @@ class Model:
 ## _private
 #####################
 
-    def _get_item_object(self, path : tuple[str]):
-        """Returns object for any model item"""
-        
-        node = self._model_definitions
-        for key in path:
-            if not isinstance(node, dict) or key not in node:
-                return None
-            node = node[key]
-        return node
-
-    def _find_max_attribute_id(self, attribute_type : Literal["Mat", "Type", "Real", "Csys", "Secn"]) -> int:
-
-        att_list : list
-        if attribute_type == "Mat":
-            att_list = self._material_list
-        elif attribute_type == "Type":
-            att_list = self._element_type_list
-        elif attribute_type == "Real":
-            att_list = self._real_constants_list
-        elif attribute_type == "Csys":
-            att_list = self._local_cs_list
-        elif attribute_type == "Secn":
-            att_list = self._section_list
-
-        if len(att_list) == 0:
-            return 0
-        else:
-            max_midx = 0
-            for att in att_list:
-                if att[0] > max_midx: max_midx = att[0]
-            return max_midx
-
-    def _add_attribute(self, attribute_type : Literal["Mat", "Type", "Real", "Csys", "Secn"], 
-                       attribute : None | Any, 
-                       midx : int | None = None) -> int:
-        """An empty attribute can be add as a placeholder in the form of (id, None)
-           Returns attribute id"""
-        att_list : list
-        if attribute_type == "Mat":
-            att_list = self._material_list
-        elif attribute_type == "Type":
-            att_list = self._element_type_list
-        elif attribute_type == "Real":
-            att_list = self._real_constants_list
-        elif attribute_type == "Csys":
-            att_list = self._local_cs_list
-        elif attribute_type == "Secn":
-            att_list = self._section_list
-
-        if midx:
-            att_list.append((midx, attribute))
-        else:
-            midx = self._find_max_attribute_id(attribute_type) + 1
-            att_list.append((midx, attribute))
-
-        return midx
-
-    def _find_max_id(self, group : dict) -> int:
+    def _find_max_tree_item_id(self, group : dict) -> int:
         """
         Returns max id of an item in a sub-group
         gets a dict such as (group_name[sub-group-1][sub-group-2]..)
@@ -755,22 +939,22 @@ class Model:
         """
         self._add_command("_execute_mesh_data", self.mesh)
 
-        """for etype in self._model_definitions["Element Types"].values():
-            if not etype.ignore_at_execution: self._add_command("_create_element_type", etype)"""
-        for etype in self._element_type_list:
-            if not etype[1].ignore_at_execution: self._add_command("_create_element_type", etype[1])
-
         for node in self._pilot_node_list:
             self._add_command("_create_pilot_node", node)
 
-        for rc in self._real_constants_list:
-            self._add_command("_set_real_constants", rc)
+        for etype in self._element_type_list:
+            if not etype.ignore_at_execution: self._add_command("_create_element_type", etype)
 
-        for cs in self._local_cs_list:
+        for rc in self._real_constants_list:
+            if not rc.ignore_at_execution: self._add_command("_create_real_constants", rc)
+
+        for mat in self._material_list:
+            if not mat.ignore_at_execution: self._add_command("_material", mat)
+
+        for cs in self._cs_list:
             if not cs.ignore_at_execution: self._add_command("_local_csys", cs)
-            
-        for mat in self._model_definitions["Materials"].values():
-            self._add_command("_material", mat)
+
+             # Creating Sections Skipped
 
         for nset in self._model_definitions["Sets"]["Node Sets"].values():
             if not nset.ignore_at_execution: self._add_command("_create_node_set", nset)
@@ -778,12 +962,12 @@ class Model:
         for elset in self._model_definitions["Sets"]["Element Sets"].values():
             if not elset.ignore_at_execution: 
                 self._add_command("_create_element_set", elset)
+                self._add_command("_assign_element_type", elset)
+                self._add_command("_assign_real_constants", elset)
                 self._add_command("_assign_material", elset)
 
-        for surf in self._model_definitions["Surfaces"].values():
+        for surf in self._surface_list:
             if not surf.ignore_at_execution: self._add_command("_create_surface", surf)
-            
-        # Creating Sections Skipped
 
         # Creating CP Skipped
         # Creation CE Skipped
@@ -802,15 +986,47 @@ class Model:
 
         # Creation Contacts Skipped
 
+        #self._add_command("_enter_solution") # Enter once for multistep analysis
         for load_step in self._load_step_list:
             self._add_command("_load_step", load_step)
             self._add_command("_solve")
             
-    def solve(self):
+    @overload
+    def solve(self, status : Literal["NEW", "RESTART"] = "NEW"): ...
+    @overload
+    def solve(self, status : Literal["NEW", "RESTART"] = "RESTART", 
+              step : int = 1, substep : int = 1): ...
+    def solve(self,
+              status : Literal["NEW", "RESTART"] = "NEW",
+              step : int = 0, substep : int = 0):
+        
+        if status == "RESTART":
+            self._load_step_list[step].status = "RESTART"
+            self._load_step_list[step].substep = substep          
+
+            timestamp = datetime.now().strftime("%d.%m.%Y-%H.%M.%S")
+            folder_name = f"Restart-LS{self._load_step_list[step].step_number}-{timestamp}"
+            self._load_step_list[step].filename = f'Restart-{self._load_step_list[step].name}'
+            self.target_dir = self.working_dir / folder_name
+
         self._create_command_pipeline()
         self._add_command("_exit_mapdl")
         self._execute_commands(True)
         self._command_pipeline.clear()
+
+        if self.target_dir != self.working_dir:
+            self._move_solution_files(self._load_step_list[step].filename, self.target_dir)
+        self.target_dir = self.working_dir # reset target directory
+
+    def _move_solution_files(self, filename, target_dir):
+        from pathlib import Path
+        import shutil
+
+        source_dir = Path(self.working_dir)
+        target_dir.mkdir(exist_ok=True)
+
+        for file in source_dir.glob(f"{filename}*"):
+            shutil.move(str(file), target_dir / file.name)
 
     def write_input_file(self):
         self._create_command_pipeline()
@@ -820,22 +1036,20 @@ class Model:
         self._command_pipeline.clear()
 
     def _start(self):
-        self.mapdl = launch_mapdl(run_location=self.working_directory,
-                                  jobname=self.modelname,
-                                  nproc=self.cpus,
-                                  override=True)
+        #try:
+        self.mapdl = launch_mapdl(run_location=self.working_dir,
+                                    jobname=self.modelname,
+                                    nproc=self.cpus,
+                                    override=True)
+        #except: self.mapdl.exit()
         
         # First, reset the MAPDL database.
         self.mapdl.clear()
         return self.mapdl
-    
-    def _stop(self):
-        # TODO : move it to the solver module
-        self.mapdl.exit()
 
     def solution(self) -> Any:
         """Returns DPF solution object after solving the model."""
-        _result_file_path = Path(self.working_directory / f"{self.modelname}.rst")
+        _result_file_path = Path(self.working_dir / f"{self.modelname}.rst")
 
         solution = None
         if self.solver_name == "MAPDL":

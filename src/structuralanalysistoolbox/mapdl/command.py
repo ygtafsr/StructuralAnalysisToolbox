@@ -24,15 +24,6 @@ def prep7(func):
         return val
     return wrapper_prep7
 
-def solu(func):
-    @functools.wraps(func)
-    def wrapper_solu(*args, **kwargs):  
-        args[0].slashsolu()
-        val = func(*args, **kwargs)
-        args[0].finish()
-        return val
-    return wrapper_solu
-
 ##########################################
 #### MISCALENOUS HELPER FUNCTIONS
 ##########################################
@@ -101,6 +92,7 @@ def get_surface_area(mapdl : core.Mapdl, surf : Surface) -> float:
     mapdl.allsel() # Reset selection after force application
     return total_area
 
+@prep7
 def _reset_attributes(mapdl : core.Mapdl):
 
     # Reset Attributes to the defaults
@@ -109,10 +101,9 @@ def _reset_attributes(mapdl : core.Mapdl):
     mapdl.mat(1)
     mapdl.type(1)
 
-
 #################################################################################
 
-def _local_csys(mapdl : core.Mapdl, local_csys : model.LocalCoordinateSystem) -> None:
+def _local_csys(mapdl : core.Mapdl, local_csys : model.CoordinateSystem) -> None:
     """Creates a local coordinate system in MAPDL."""
     mapdl.local(kcn=str(local_csys.midx), kcs=local_csys.type, 
                 xc=local_csys.origin[0], yc=local_csys.origin[1], zc=local_csys.origin[2],
@@ -139,25 +130,56 @@ def _create_pilot_node(mapdl: core.Mapdl, *args):
 def _create_node_set(mapdl : core.Mapdl, nset : Nset):
     mapdl.components[nset.name] = "NODE", nset.items # type: ignore
 
+@prep7
 def _create_element_set(mapdl : core.Mapdl, elset : Elset):
-    mapdl.components[elset.name] = "ELEM", elset.items # type: ignore
+
+    if elset.name and elset.items:
+        mapdl.components[elset.name] = "ELEM", elset.items # type: ignore
 
 @prep7
 def _create_surface(mapdl : core.Mapdl, *args):
         
     surf : model.Surface = args[0]
 
-    # Sets the element coordinate system :: For directional Pressure/Traction
-    if surf.local_csys_id:
-        mapdl.esys(surf.local_csys_id)
+    mapdl.type(str(surf.element_type.midx))  # type: ignore
+    mapdl.real(str(surf.real_constants.midx)) # type: ignore
+    mapdl.mat(str(surf.material.midx)) # type: ignore
+    mapdl.esys(str(surf.csys.midx)) # type : ignore
 
-    mapdl.type(str(surf.etype.midx)) 
     mapdl.nsel(type_= 'S', vmin = surf.nset.items) # type: ignore
     mapdl.esurf()
 
-    mapdl.esys(0) # reset to global CSYS
-    mapdl.type('1') # reset to default element type
+    _reset_attributes(mapdl)
     mapdl.allsel()
+
+##########################################
+#### ELEMENT ATTRIBUTES
+##########################################
+
+@prep7
+def _create_element_type(mapdl : core.Mapdl, *args):
+    """Create the element type & Asssign Keyopts"""
+    etype = args[0]
+    mapdl.et(etype.midx, ename=etype.name)
+
+    for keyopt in etype.get_keyopts(): # keyopt :: (keyopt_id, value)
+        mapdl.keyopt(itype= str(etype.midx), knum=keyopt[0], value=keyopt[1])
+
+@prep7
+def _create_real_constants(mapdl : core.Mapdl, rc):
+    """Gets a real constant object and creates real constants in MAPDL."""
+
+    real_constants = rc.get_real_constants()
+
+    for idx, rc_group in enumerate(real_constants):
+        if idx == 0:
+            mapdl.r(f"{rc.midx}", # real constant midx
+                    rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
+        else:
+            mapdl.rmore(rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
+    
+def _update_real_constants(mapdl : core.Mapdl, *args):
+    pass
 
 @prep7
 def _material(mapdl : core.Mapdl, mat : material.Material) -> None:
@@ -205,35 +227,25 @@ def _material(mapdl : core.Mapdl, mat : material.Material) -> None:
                     mapdl.tbpt(oper="DEFI", x1=f"{data[0]}", x2=f"{data[1]}")
 
 @prep7
-def _assign_material(mapdl : core.Mapdl, elset):
+def _assign_material(mapdl : core.Mapdl, elset : Elset):
 
-    mapdl.emodif(iel=elset.name, stloc="MAT", i1=elset.properties["Material"].midx)
-
-@prep7
-def _create_element_type(mapdl : core.Mapdl, *args):
-    """Create the element type & Asssign Keyopts"""
-    etype_obj = args[0]
-    mapdl.et(etype_obj.midx, ename=etype_obj.name)
-
-    for keyopt in etype_obj.get_keyopts(): # keyopt :: (keyopt_id, value)
-        mapdl.keyopt(itype= str(etype_obj.midx), knum=keyopt[0], value=keyopt[1])
+    if elset.material:
+        mapdl.emodif(iel=elset.name, stloc="MAT", i1=elset.material.midx)
+        mapdl.allsel()
 
 @prep7
-def _set_real_constants(mapdl : core.Mapdl, *args):
-    """Gets a real constant object and creates real constants in MAPDL."""
-    
-    rc_obj = args[0][1]
-    real_constants = rc_obj.get_real_constants()
+def _assign_element_type(mapdl : core.Mapdl, elset : Elset):
 
-    for idx, rc_group in enumerate(real_constants):
-        if idx == 0:
-            mapdl.r(f"{rc_obj.midx}", # real constant midx
-                    rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
-        else:
-            mapdl.rmore(rc_group[0], rc_group[1], rc_group[2], rc_group[3], rc_group[4], rc_group[5])
-    
-def _update_real_constants(mapdl : core.Mapdl, *args):
-    pass
+    if elset.element_type:
+        mapdl.emodif(iel=elset.name, stloc="TYPE", i1=elset.element_type.midx)
+        mapdl.allsel()
+
+@prep7
+def _assign_real_constants(mapdl : core.Mapdl, elset : Elset):
+
+    if elset.real_constants: 
+        mapdl.emodif(iel=elset.name, stloc="REAL", i1=elset.real_constants.midx)
+        mapdl.allsel()
 
 
 #############################################
@@ -241,23 +253,22 @@ def _update_real_constants(mapdl : core.Mapdl, *args):
 #############################################
 
 ## SURFACE BASED CONSTRAINTS ##
-
 @prep7
 def _create_rigid_surface_constraint(mapdl : core.Mapdl, *args):
         
-    _create_rigid_surface_constraint : constraint.RigidSurfaceConstraint = args[0]
-    contact = _create_rigid_surface_constraint.contact_element_type
-    target = _create_rigid_surface_constraint.target_element_type
-    pilot_node = mapdl.components[_create_rigid_surface_constraint.pilot_node]
-    contact_nodes = mapdl.components[_create_rigid_surface_constraint.contact_nodes]
+    rigid_surface_constraint : constraint.RigidSurfaceConstraint = args[0]
+    contact = rigid_surface_constraint.contact_element_type
+    target = rigid_surface_constraint.target_element_type
+    pilot_node = mapdl.components[rigid_surface_constraint.pilot_node]
+    contact_nodes = mapdl.components[rigid_surface_constraint.contact_nodes]
 
     # Activate associated real constant and material
-    mapdl.real(str(_create_rigid_surface_constraint.real_constants.midx))
-    mapdl.mat(str(_create_rigid_surface_constraint.material_midx))
+    mapdl.real(str(rigid_surface_constraint.real_constants.midx))
+    mapdl.mat(str(rigid_surface_constraint.material_midx))
 
     # Local cs
-    if _create_rigid_surface_constraint.local_cs:
-        mapdl.csys(_create_rigid_surface_constraint.local_cs.midx)
+    if rigid_surface_constraint.local_cs:
+        mapdl.csys(rigid_surface_constraint.local_cs.midx)
 
     # Create contact elements
     mapdl.type(str(contact.midx))
@@ -277,28 +288,25 @@ def _create_rigid_surface_constraint(mapdl : core.Mapdl, *args):
 @prep7
 def _create_force_distirbuted_constraint(mapdl : core.Mapdl, *args):
     
-    _create_rigid_surface_constraint : constraint.ForceDistributedConstraint = args[0]
-    contact = _create_rigid_surface_constraint.contact_element_type
-    target = _create_rigid_surface_constraint.target_element_type
-    pilot_node = mapdl.components[_create_rigid_surface_constraint.pilot_node]
-    contact_nodes = mapdl.components[_create_rigid_surface_constraint.contact_nodes]
+    force_distributed_constraint : constraint.ForceDistributedConstraint = args[0]
+    contact = force_distributed_constraint.contact_element_type
+    target = force_distributed_constraint.target_element_type
+    pilot_node = mapdl.components[force_distributed_constraint.pilot_node]
+    contact_nodes = mapdl.components[force_distributed_constraint.contact_nodes]
 
     # First modify real constant fkn, if there is a "user defined" weightening
-    if isinstance(_create_rigid_surface_constraint.weighting_factor, np.ndarray):
+    if isinstance(force_distributed_constraint.weighting_factor, np.ndarray):
         # For a naming convention get first letters of pilot and contact node set names
-        name = f"{_create_rigid_surface_constraint.pilot_node[:4]}_{_create_rigid_surface_constraint.contact_nodes[:4]}"
+        name = f"{force_distributed_constraint.pilot_node[:4]}_{force_distributed_constraint.contact_nodes[:4]}"
         mapdl.load_table(name=name,
-                         array=_create_rigid_surface_constraint.weighting_factor,
+                         array=force_distributed_constraint.weighting_factor,
                          var1="NODE")
-        mapdl.rmodif(nset=str(_create_rigid_surface_constraint.real_constants.midx), stloc=3, v1=f"%{name}%")
+        mapdl.rmodif(nset=str(force_distributed_constraint.real_constants.midx), stloc=3, v1=f"%{name}%")
 
-    # Activate associated real constant and material
-    mapdl.real(str(_create_rigid_surface_constraint.real_constants.midx))
-    mapdl.mat(str(_create_rigid_surface_constraint.material_midx))
-
-    # Local cs
-    if _create_rigid_surface_constraint.local_cs:
-        mapdl.csys(_create_rigid_surface_constraint.local_cs.midx)
+    # Activate associated attributes
+    mapdl.real(str(force_distributed_constraint.real_constants.midx))
+    mapdl.mat(str(force_distributed_constraint.material.midx))
+    mapdl.csys(force_distributed_constraint.coordinate_system.midx)
 
     # Create contact elements
     mapdl.type(str(contact.midx))
@@ -318,19 +326,19 @@ def _create_force_distirbuted_constraint(mapdl : core.Mapdl, *args):
 @prep7
 def _create_coupled_surface_constraint(mapdl : core.Mapdl, *args):
 
-    mpc_force_dist : constraint.CoupledSurfaceConstraint = args[0]
-    contact = mpc_force_dist.contact_element_type
-    target = mpc_force_dist.target_element_type
-    pilot_node = mapdl.components[mpc_force_dist.pilot_node]
-    contact_nodes = mapdl.components[mpc_force_dist.contact_nodes]
+    coupled_surface_constraint : constraint.CoupledSurfaceConstraint = args[0]
+    contact = coupled_surface_constraint.contact_element_type
+    target = coupled_surface_constraint.target_element_type
+    pilot_node = mapdl.components[coupled_surface_constraint.pilot_node]
+    contact_nodes = mapdl.components[coupled_surface_constraint.contact_nodes]
 
     # Activate associated real constant and material
-    mapdl.real(str(mpc_force_dist.real_constants.midx))
-    mapdl.mat(str(mpc_force_dist.material_midx))
+    mapdl.real(str(coupled_surface_constraint.real_constants.midx))
+    mapdl.mat(str(coupled_surface_constraint.material_midx))
 
     # Local cs
-    if mpc_force_dist.local_cs:
-        mapdl.csys(mpc_force_dist.local_cs.midx)
+    if coupled_surface_constraint.local_cs:
+        mapdl.csys(coupled_surface_constraint.local_cs.midx)
 
     # Create contact elements
     mapdl.type(str(contact.midx))
@@ -347,7 +355,30 @@ def _create_coupled_surface_constraint(mapdl : core.Mapdl, *args):
     _reset_attributes(mapdl)
     mapdl.allsel()
 
+## RIGID MPC CONSTRAINTS ##
+@prep7                           
+def _MPC184(mapdl : core.Mapdl, *args) -> None:
 
+    mpc = args[0]
+    method = 0
+    if mpc.method == "Direct Elimination":
+        method = 0
+    elif mpc.method == "Lagrange Multiplier":
+        method = 1
+    elif mpc.method == "Penalty-based":
+        method = 2
+
+    mapdl.et(itype=mpc.etype.midx,
+             ename="184",
+             kop1=mpc.behaviour,
+             kop2=method)
+    
+    mapdl.type(mpc.etype.midx)
+
+    for node in mpc.dependent.items:
+        mapdl.e(node, mpc.independent.items[0])
+
+## LINEAR COUPLINGS ##
 @prep7
 def _coupled_dof(mapdl : core.Mapdl, *args) -> int:
     """Create a dof coupling between nodes and returns primary node number 
@@ -374,32 +405,15 @@ def _coupled_dof(mapdl : core.Mapdl, *args) -> int:
 def _coupled_interface(mapdl : core.Mapdl, coupling : constraint.CoupledInterface):
     pass
 
-@prep7                           
-def _MPC184(mapdl : core.Mapdl, *args) -> None:
-
-    mpc = args[0]
-    method = 0
-    if mpc.method == "Direct Elimination":
-        method = 0
-    elif mpc.method == "Lagrange Multiplier":
-        method = 1
-    elif mpc.method == "Penalty-based":
-        method = 2
-
-    mapdl.et(itype=mpc.etype.midx,
-             ename="184",
-             kop1=mpc.behaviour,
-             kop2=method)
-    
-    mapdl.type(mpc.etype.midx)
-
-    for node in mpc.dependent.items:
-        mapdl.e(node, mpc.independent.items[0])
 
 @prep7
 def _create_joint(mapdl : core.Mapdl, *args):
     model_item_obj : constraint.MPCJoint = args[0]
     print(model_item_obj)
+
+#############################################
+#### IMPORTING EXTERNAL MESH DATA
+#############################################
 
 @prep7
 def _execute_mesh_data(mapdl : core.Mapdl, *args):
@@ -437,45 +451,12 @@ output_mapping = {
     "NODAL-AVG CREEP STRAINS" : "NDCR"
 }
 
-@solu
-def _load_step(mapdl: core.Mapdl, *args):
+#############################################
+#### LOAD STEP 
+#############################################
 
-    load_step : LoadStep = args[0]
 
-    mapdl.allsel() # !!!!
-
-    # Solver Type
-    if load_step.solver_controls.solver_type == "DIRECT":
-        mapdl.eqslv(lab="SPARSE")
-    elif load_step.solver_controls.solver_type == "ITERATIVE":
-        mapdl.eqslv(lab="PCG")
-    else: return # Raise "InvalidParameter" exception
-
-    # Pivot Check
-    mapdl.pivcheck(key=load_step.solver_controls.pivot_check,
-                   prntcntrl=load_step.solver_controls.pivot_check_print)
-    
-    # Weak Springs
-    # Inertia Relif
-    # Quasi-Static Analysis
-
-    # Specify the analysis type and restart status
-    if load_step.status == "RESTART":
-        mapdl.antype(antype=load_step.analysis,
-                    status=load_step.status,
-                    ldstep=load_step.step,
-                    substep=load_step.substep,
-                    action=load_step.action)
-    elif load_step.status == "NEW":
-        mapdl.antype(antype=load_step.analysis)
-    else: return # Raise an exception
-
-    # Specify non-linear geometry option
-    mapdl.nlgeom(load_step.nonlinear_geo)
-
-    # Load Step Time
-    #mapdl.time(load_step.step_controls.step_end_time)
-
+def step_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # Time Stepping
     mapdl.autots(load_step.step_controls.auto_time_stepping)
     if load_step.step_controls.auto_time_stepping == "ON": # AUTO TIME STEPPING
@@ -507,10 +488,37 @@ def _load_step(mapdl: core.Mapdl, *args):
             mapdl.nsubst(nsbstp=load_step.step_controls.number_of_substeps)
     else: return # raise an exception
 
-    ########################
-    ### Nonlinear Controls
-    ########################
+    # Load Step Time
+    #mapdl.time(load_step.step_controls.step_end_time)
 
+def solver_controls(mapdl: core.Mapdl, load_step: LoadStep):
+    # Solver Type
+    if load_step.solver_controls.solver_type == "DIRECT":
+        mapdl.eqslv(lab="SPARSE")
+    elif load_step.solver_controls.solver_type == "ITERATIVE":
+        mapdl.eqslv(lab="PCG")
+    else: return # Raise "InvalidParameter" exception
+
+    # Weak Springs
+    # Inertia Relif
+    # Quasi-Static Analysis
+
+    # Pivot Check
+    mapdl.pivcheck(key=load_step.solver_controls.pivot_check,
+                   prntcntrl=load_step.solver_controls.pivot_check_print)
+    
+    # Specify non-linear geometry option
+    if load_step.step_number == 1:  # The NLGEOM command cannot be changed after the first load step.
+        mapdl.nlgeom(load_step.nonlinear_geo)
+
+def restart_controls(mapdl: core.Mapdl, load_step: LoadStep):
+    
+    if load_step.restart_controls:
+        mapdl.rescontrol(action=load_step.restart_controls.action,
+                        ldstep=str(load_step.restart_controls.load_step),
+                        frequency=str(load_step.restart_controls.frequency))
+
+def nonlinear_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # Newton-Raphson Option
     if load_step.nonlinear_controls.newton_raphson.creep_limiting:
         if load_step.nonlinear_controls.newton_raphson.limit:
@@ -531,7 +539,6 @@ def _load_step(mapdl: core.Mapdl, *args):
                         optval="OFF")
         elif load_step.nonlinear_controls.newton_raphson.adaptive_descent == None: # Default
             mapdl.nropt(option1=load_step.nonlinear_controls.newton_raphson.option)
-
 
     # Convergence Controls
     # Force Convergence
@@ -579,22 +586,6 @@ def _load_step(mapdl: core.Mapdl, *args):
     elif load_step.nonlinear_controls.line_search == None:
         mapdl.lnsrch(key="AUTO")
 
-    # Cutback Controls
-
-
-    # Iteration Monitoring
-    mapdl.nldiag(label=load_step.resiudal_monitoring.function,
-                 key=load_step.resiudal_monitoring.characteristics,
-                 maxfile=load_step.resiudal_monitoring.maxfile)
-    
-    mapdl.nldiag(label=load_step.violation_monitoring.function,
-                 key=load_step.violation_monitoring.characteristics,
-                 maxfile=load_step.violation_monitoring.maxfile)
-    
-    mapdl.nldiag(label=load_step.contact_monitoring.function,
-                 key=load_step.contact_monitoring.characteristics,
-                 maxfile=load_step.contact_monitoring.maxfile)
-    
     # Stabilization
     if load_step.nonlinear_controls.stabilization.state:
         if load_step.nonlinear_controls.stabilization.method == "ENERGY":
@@ -612,38 +603,85 @@ def _load_step(mapdl: core.Mapdl, *args):
     else:
         mapdl.stabilize(key="OFF")
 
-    # Outputs
+def output_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # OUTRES for post-processing
     for out in load_step.outputs:
         mapdl.outres(item=output_mapping[out[0]], freq=out[1], cname=out[2])
 
+def nonlinear_diagnostics(mapdl: core.Mapdl, load_step: LoadStep):
+    # Iteration Monitoring
+    mapdl.nldiag(label=load_step.resiudal_monitoring.function,
+                 key=load_step.resiudal_monitoring.characteristics,
+                 maxfile=load_step.resiudal_monitoring.maxfile)
+    
+    mapdl.nldiag(label=load_step.violation_monitoring.function,
+                 key=load_step.violation_monitoring.characteristics,
+                 maxfile=load_step.violation_monitoring.maxfile)
+    
+    mapdl.nldiag(label=load_step.contact_monitoring.function,
+                 key=load_step.contact_monitoring.characteristics,
+                 maxfile=load_step.contact_monitoring.maxfile)
+    
+
+def _load_step(mapdl: core.Mapdl, *args):
+
+    load_step : LoadStep = args[0]
+    mapdl.slashsolu()
+    mapdl.allsel() # !!!!
+
+    if load_step.status == "RESTART":       
+        mapdl.antype(status="RESTART", ldstep=load_step.step, substep=load_step.substep, action="RSTCREATE")
+        mapdl.solve()
+        
+        mapdl.finish()
+        mapdl.filname(load_step.filename)
+        mapdl.slashsolu()
+
+    # Set step status to NEW after restarting completed
+    load_step.status = "NEW"
+    load_step.substep = None
+    
+    mapdl.antype(antype=load_step.analysis_type, status="NEW")
+
+    step_controls(mapdl, load_step)
+    solver_controls(mapdl, load_step)
+    restart_controls(mapdl, load_step)
+    nonlinear_controls(mapdl, load_step)
+    output_controls(mapdl, load_step)
+    nonlinear_diagnostics(mapdl, load_step)
+
+    # Cutback Controls
 
     ########################
     ### Load - BC
     ########################
 
     # Reference Temperature
-    mapdl.tref(tref=load_step.reference_temp)
+    mapdl.tref(tref=str(load_step.reference_temp))
 
     # Loading Style
     if load_step.loading_style == "RAMPED":
-        mapdl.kbc(key=0)
+        mapdl.kbc(key=str(0))
     elif load_step.loading_style == "STEPPED":
-        mapdl.kbc(key=1)
+        mapdl.kbc(key=str(1))
 
-    # Force
     for force in load_step.forces:
+        # Adjust direction syntax from stbox to MAPDL
+        _direction = f"F{force.direction}"
+
         if force.operation == "NEW":
-            mapdl.fcum(oper="REPL")
+            mapdl.fcum(oper="REPL") # stbox = new (replace previous force value)
             set_force(mapdl, force)
+            mapdl.fcum() # reset force accumulation
         elif force.operation == "ADD":
-            mapdl.fcum(oper="ADD")
+            mapdl.fcum(oper="ADD") # stbox = add (add to previous force value)
             set_force(mapdl, force)
+            mapdl.fcum() # reset force accumulation
         elif force.operation == "DELETE":
             if force.fixed:
-                mapdl.fdele(node=str(force.set), lab=f"F{force.direction}", lkey="FIXED")
+                mapdl.fdele(node=str(force.set), lab=_direction, lkey="FIXED")
             else:
-                mapdl.fdele(node=str(force.set), lab=f"F{force.direction}")
+                mapdl.fdele(node=str(force.set), lab=_direction)
 
     for moment in load_step.moments:
 
@@ -663,47 +701,46 @@ def _load_step(mapdl: core.Mapdl, *args):
         if pressure.operation == "NEW":
             mapdl.sfcum(lab="PRES", oper="REPL")
             set_pressure(mapdl, pressure)
+            #mapdl.sfcum() # Reset
         elif pressure.operation == "ADD":
             mapdl.sfcum(lab="PRES", oper="ADD")
             set_pressure(mapdl, pressure)
+            #mapdl.sfcum() # Reset
         elif pressure.operation == "DELETE":
-            mapdl.sfdele(nlist=str(pressure.surf.nset), lab="PRES")
+            mapdl.sfdele(nlist=str(pressure.set.nset), lab="PRES")
             
-    for disp in load_step.displacements:
-        if disp[3] == "NEW":
+    for displacement in load_step.displacements:
+        # Adjust direction syntax from stbox to MAPDL
+        _direction : str
+        if displacement.direction == "ALL": _direction = displacement.direction
+        elif displacement.direction in ("X", "Y", "Z"): _direction = f"U{displacement.direction}"
+        elif displacement.direction in ("RX", "RY", "RZ"): _direction = f"ROT{displacement.direction[1]}"
+
+        if displacement.operation == "NEW":
             mapdl.dcum(oper="REPL")
-            if disp[1] == "ALL":
-                mapdl.d(node=disp[0], lab=disp[1], value=disp[2])
-            elif disp[1] in ("X", "Y", "Z"):
-                mapdl.d(node=disp[0], lab=f"U{disp[1]}", value=disp[2])
-            elif disp[1] in ("RX", "RY", "RZ"):
-                mapdl.d(node=disp[0], lab=disp[1].replace("R", "ROT"), value=disp[2])
-        elif disp[3] == "ADD":
+            set_displacement(mapdl, displacement)
+        elif displacement.operation == "ADD":
             mapdl.dcum(oper="ADD")
-            if disp[1] == "ALL":
-                mapdl.d(node=disp[0], lab=disp[1], value=disp[2])
-            elif disp[1] in ("X", "Y", "Z"):
-                mapdl.d(node=disp[0], lab=f"U{disp[1]}", value=disp[2])
-            elif disp[1] in ("RX", "RY", "RZ"):
-                mapdl.d(node=disp[0], lab=disp[1].replace("R", "ROT"), value=disp[2])
-        elif disp[3] == "DELETE":
-            if disp[4]:
-                mapdl.ddele(node=disp[0], lab=disp[1].replace("R", "ROT"), rkey="ON")
+            set_displacement(mapdl, displacement)
+        elif displacement.operation == "DELETE":
+            if displacement.ramping:
+                mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="ON")
             else:
-                mapdl.ddele(node=disp[0], lab=disp[1].replace("R", "ROT"), rkey="OFF")
+                mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="OFF")
 
 
 def set_force(mapdl: core.Mapdl, force : Force):
+    # Adjust direction syntax from stbox to MAPDL
+    _direction = f"F{force.direction}"
     if force.applied_by == "NODE SET":
-        nset = mapdl.components[force.set.name] # In case of pilot node assingment with None items!
-        mapdl.nsel(type_='S', vmin=nset) # type: ignore
-        mapdl.f(node="ALL", lab=f"F{force.direction}", value=str(force.value))
+        mapdl.csys(force.csys.midx)
+        mapdl.f(node=force.set.name, lab=_direction, value=str(force.value))
     elif force.applied_by == "ELEMENT FACES":
         area = get_surface_area(mapdl, force.set)
         pressure = force.value / area # Convert Force to Surface Traction (Pressure)
         mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
         mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
-        _sfcontrol(mapdl=mapdl, direction=force.direction, coordinate_system_id=force.local_cs_id, loaded_area="INITIAL")
+        _sfcontrol(mapdl=mapdl, direction=_direction, coordinate_system=force.csys, loaded_area="INITIAL")
         mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
         _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
     elif force.applied_by == "SURFACE ELEMENTS":
@@ -711,12 +748,12 @@ def set_force(mapdl: core.Mapdl, force : Force):
         pressure = force.value / area # Convert Force to Surface Traction (Pressure)
         mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
         mapdl.esel(type_='S', item="type", vmin=str(force.set.etype.midx)) # type: ignore
-        #mapdl.csys(force.coordinate_system_id)
         mapdl.sfe(elem="ALL", lab="PRES", val1=str(force.value))
 
+    #_reset_attributes(mapdl)
     mapdl.allsel() # Reset selection after force application
 
-def _sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system_id=None, loaded_area=None, reset=False):
+def _sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system=None, loaded_area=None, reset=False):
     """
     Sets the SFCONTROL parameters for directional pressure/traction application.
     """
@@ -740,7 +777,7 @@ def _sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system_id=None, loa
         elif direction == "Z":
             lcomp = "2" # Z
         #mapdl.csys(coordinate_system_id)
-        val1 = str(coordinate_system_id) # type: ignore
+        val1 = str(coordinate_system.midx) # type: ignore
 
     if loaded_area == "DEFORMED":
         karea = "0"
@@ -758,41 +795,55 @@ def set_pressure(mapdl: core.Mapdl, pressure : Pressure):
     # 3) Pressure with Element Faces :: SFE Command
     if pressure.applied_by == "NODE SET":
         # Select surface nodes by nset
-        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
         mapdl.sf(nlist="ALL", lab="PRES", value=str(pressure.value))
     elif pressure.applied_by == "ELEMENT FACES":
         # Select surface nodes by nset
-        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
         # Select element only if all of its nodes are in the selected nodal set
         mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
-        _sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system_id=pressure.local_cs_id, loaded_area=pressure.loaded_area)
+        _sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system=pressure.csys, loaded_area=pressure.loaded_area)
         mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
         _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
     elif pressure.applied_by == "SURFACE ELEMENTS":
         # Selecet elements by type id
-        mapdl.nsel(type_='S', vmin=pressure.surf.nset.items) # type: ignore
-        mapdl.esel(type_='S', item="type", vmin=str(pressure.surf.etype.midx)) # type: ignore
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(pressure.set.element_type.midx)) # type: ignore
         #mapdl.csys(pressure.coordinate_system_id)
         mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
 
     mapdl.csys(0) # Reset to global CSYS
     mapdl.allsel() # Reset selection after surface load application
 
-@solu
+def set_displacement(mapdl: core.Mapdl, displacement : Displacement):
+    # Adjust direction syntax from stbox to MAPDL
+    _direction : str
+    if displacement.direction == "ALL": _direction = displacement.direction
+    elif displacement.direction in ("X", "Y", "Z"): _direction = f"U{displacement.direction}"
+    elif displacement.direction in ("RX", "RY", "RZ"): _direction = f"ROT{displacement.direction[1]}"
+    mapdl.d(node=displacement.set.name, lab=_direction, value=str(displacement.value))
+    mapdl.allsel()
+
+#############################################
+#### SOLUTION 
+#############################################
+
+def _enter_solution(mapdl: core.Mapdl, *args):
+    mapdl.slashsolu()
+
 def _solve(mapdl: core.Mapdl, *args):  
-
-    """solution : model.Solution = args[0]
-    for ls in solution._load_history:
-        _load_step(mapdl, ls)"""
-
     mapdl.allsel()
     mapdl.solve()
     mapdl.save()
+    mapdl.finish()
 
 def _write_input_file(mapdl: core.Mapdl, *args):
     mapdl.cdwrite(option="DB", fname="model.cdb")
 
 def _exit_mapdl(mapdl: core.Mapdl, *args):
+    #mapdl.cdwrite("DB", "COMMANDS.cdb")
+    #mapdl.lgwrite("COMMANDS.log")
+    mapdl.finish()
     mapdl.exit()
 
 def _write_comment(mapdl: core.Mapdl, *args):
