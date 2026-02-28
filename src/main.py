@@ -38,20 +38,27 @@ def main():
     load_step_1.force("Force_Node", -5000, "Y")
     load_step_1.force("Force_Node", 8000, "X")
     load_step_1.displacement("Fixed", 0, "ALL")
-    load_step_1.output("ALL")
-    load_step_1.restart(frequency="LAST")
+    load_step_1.output("BASIC")
+    load_step_1.restart("LAST")
 
     load_step_2 = model.add_loadstep(name="LS-2")
     load_step_2.pressure("LOADING_NODES_2", 100, "Y")
     load_step_2.force("Force_Node", 4000, "Y", operation="ADD")
-    load_step_2.output("ALL")
-
-    load_step_2.force("Force_Node", 8000, "Y", operation="ADD")
-
+    load_step_2.output("BASIC")
     model.bc_history()
-    model.plot_load_history("Force_Node", "Force", "Y")
 
-    pass
+    model.solve()
+
+    #load_step_2.forces.clear()
+    #load_step_2.pressures.clear()
+    #load_step_2.pressure("LOADING_NODES_2", 200, "Y")
+
+
+    load_step_2.force("Force_Node", 1000, "X", operation="ADD")
+    model.bc_history()
+
+    model.solve(status="RESTART", step=1, substep=11)
+
 
 
 if __name__ == "__main__":

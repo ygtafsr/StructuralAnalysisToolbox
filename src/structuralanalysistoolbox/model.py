@@ -121,10 +121,9 @@ class Analysis:
          .
         """
 
-    def add_new_row(self):
+    def add_new_row(self, step_number : int):
         """Add new row full of 'None' up to new load step."""
-        current_loadstep = len(self.model._load_step_list)
-        self.ls_table.append([None for i in range(0, current_loadstep)])
+        self.ls_table.append([None for i in range(0, step_number)])
         pass
 
     def add_new_column(self):
@@ -139,7 +138,7 @@ class Analysis:
                     return (row_idx, col_idx)
         return None
 
-    def add_bc(self, bc : Force | Moment | Pressure | Displacement):
+    def add_bc(self, bc : Force | Moment | Pressure | Displacement, step_number : int):
         """ 
         Adds a bc to the last load step. If there is a same scope for bc which is
         already defined, then add the bc this row. Otherwise, adds a new scope row.
@@ -150,20 +149,31 @@ class Analysis:
         # Add a new bc object in any case that the bc is a continuation of a previous one or not.
         # Continuity check is only important to decide using a new scope or a previous one.
 
-        current_loadstep = len(self.model._load_step_list)
+        #step_number = len(self.model._load_step_list)
 
-        if current_loadstep == 1:
-            self.add_new_row()
+        if step_number == 1:
+            self.add_new_row(step_number)
             self.ls_table[-1][-1] = bc
         else:
             if item := self.check_columns(bc):
-                self.ls_table[item[0]][current_loadstep-1] = bc 
+                self.ls_table[item[0]][step_number-1] = bc 
             else:
-                self.add_new_row()
+                self.add_new_row(step_number)
                 self.ls_table[-1][-1] = bc
         pass
 
     def get_bc_history(self) -> pd.DataFrame:
+
+        self.ls_table.clear()
+
+        for ls in self.model._load_step_list:
+            self.add_new_column()
+            for force in ls.forces:
+                self.add_bc(force, ls.step_number)
+            for press in ls.pressures:
+                self.add_bc(press, ls.step_number)
+            for disp in ls.displacements:
+                self.add_bc(disp, ls.step_number)
 
         def _bc_to_str(bc_obj: Force | Moment | Pressure | Displacement | None) -> str | None:
             if bc_obj is None:
@@ -262,12 +272,9 @@ class Model:
                                     } 
 
         if work_folder == '':
-            _current_path = Path.cwd()
+            self._current_path = Path.cwd()
             timestamp = datetime.now().strftime("%d.%m.%Y-%H.%M.%S")
-            folder_name = f"{name}-{timestamp}"
-            self.working_dir = _current_path / folder_name
-            self.working_dir.mkdir()
-            self.target_dir = self.working_dir # For possible restart files movement
+            self.folder_name = f"{name}-{timestamp}"
 
 #####################
 ## IMPORT/EXPORT
@@ -736,36 +743,19 @@ class Model:
 ## LOAD STEP
 #####################
 
-    @overload
     def add_loadstep(self, 
                      name : str,
-                     analysis  = "STATIC",
-                     status  = "NEW") -> LoadStep: ...
-    @overload
-    def add_loadstep(self, 
-                     name : str,
-                     analysis = "STATIC",
-                     status = "RESTART",
-                     step : int = 0, substep : int = 0) -> LoadStep: ...
-    def add_loadstep(self, 
-                     name : str,
-                     analysis : Literal["STATIC", "BUCKLE", "MODAL", "HARMIC" ,"TRANS", "SUBSTR"] | Any = "STATIC",
-                     status : Literal["NEW", "RESTART"] | Any = "NEW",
-                     step : int = 0, substep : int = 0) -> LoadStep:
+                     analysis : Literal["STATIC", "BUCKLE", "MODAL", "HARMIC" ,"TRANS", "SUBSTR"] = "STATIC") -> LoadStep:
         
-        ls = LoadStep(name=name,
-                      model=self,
-                      step_number=len(self._load_step_list) + 1,
-                      end_time = 1,
-                      analysis_type=analysis)
+        step_number = len(self._load_step_list) + 1
+        ls = LoadStep(name= name,
+                      model= self,
+                      step_number= step_number,
+                      end_time= 1,
+                      analysis_type= analysis)
         
         self._load_step_list.append(ls)
-
-        ls.step_number = self._find_max_tree_item_id(self._model_definitions["Load Steps"]) + 1
         self._model_definitions["Load Steps"][name] = ls   
-
-        self._analysis.add_new_column()     
-
         return ls
 
 #####################
@@ -904,9 +894,6 @@ class Model:
         if self.solver_name == "MAPDL":
             self.mapdl = self._start()
 
-        """for command in self._command_pipeline:
-            print(command)"""
-
         for command in self._command_pipeline:
 
             if args[0] == False and command[0].__name__ == "_solve":
@@ -914,7 +901,7 @@ class Model:
                 continue # Skip "Solve" Command
 
             if len(command) > 1:
-                command[0](self.mapdl, command[1])
+                command[0](self.mapdl, *command[1:])
             else: 
                 command[0](self.mapdl)
 
@@ -986,10 +973,10 @@ class Model:
 
         # Creation Contacts Skipped
 
-        #self._add_command("_enter_solution") # Enter once for multistep analysis
+        """self._add_command("_enter_solution") # Enter once for multistep analysis !!!
         for load_step in self._load_step_list:
             self._add_command("_load_step", load_step)
-            self._add_command("_solve")
+            self._add_command("_solve")"""
             
     @overload
     def solve(self, status : Literal["NEW", "RESTART"] = "NEW"): ...
@@ -1000,7 +987,11 @@ class Model:
               status : Literal["NEW", "RESTART"] = "NEW",
               step : int = 0, substep : int = 0):
         
+        
+
         if status == "RESTART":
+
+            # !!! Be careful that for _load_step_list[step] indicate loadstep-2 for step parameter 1 !!!
             self._load_step_list[step].status = "RESTART"
             self._load_step_list[step].substep = substep          
 
@@ -1008,15 +999,38 @@ class Model:
             folder_name = f"Restart-LS{self._load_step_list[step].step_number}-{timestamp}"
             self._load_step_list[step].filename = f'Restart-{self._load_step_list[step].name}'
             self.target_dir = self.working_dir / folder_name
+            self.target_dir.mkdir(exist_ok=True)
 
-        self._create_command_pipeline()
-        self._add_command("_exit_mapdl")
+            self._add_command("_enter_solution") # Enter once for multistep analysis !!!
+            self._add_command("_restart", step, substep)
+            self._add_command("_solve")
+            self._add_command("_change_job_name", self._load_step_list[step].filename)
+            self._add_command("_enter_solution") # Enter once for multistep analysis !!!
+            for load_step in self._load_step_list[step:]:
+                self._add_command("_load_step", load_step)
+                self._add_command("_solve")
+            self._add_command("_exit_mapdl")
+
+            # Move files
+            if self.target_dir != self.working_dir: # This is not equal in case of a restart analysis
+                self._move_solution_files(self._load_step_list[step].filename, self.target_dir)
+        else:
+            self.working_dir = self._current_path / self.folder_name
+            self.working_dir.mkdir()
+            self.target_dir = self.working_dir # For possible restart files movement
+
+            self._create_command_pipeline()
+            self._add_command("_enter_solution") # Enter once for multistep analysis !!!
+            for load_step in self._load_step_list:
+                self._add_command("_load_step", load_step)
+                self._add_command("_solve")
+            self._add_command("_exit_mapdl")
+        
         self._execute_commands(True)
         self._command_pipeline.clear()
 
-        if self.target_dir != self.working_dir:
-            self._move_solution_files(self._load_step_list[step].filename, self.target_dir)
-        self.target_dir = self.working_dir # reset target directory
+
+        
 
     def _move_solution_files(self, filename, target_dir):
         from pathlib import Path
@@ -1036,11 +1050,12 @@ class Model:
         self._command_pipeline.clear()
 
     def _start(self):
+
         #try:
         self.mapdl = launch_mapdl(run_location=self.working_dir,
-                                    jobname=self.modelname,
-                                    nproc=self.cpus,
-                                    override=True)
+                                  jobname=self.modelname,
+                                  nproc=self.cpus,
+                                  override=True)
         #except: self.mapdl.exit()
         
         # First, reset the MAPDL database.

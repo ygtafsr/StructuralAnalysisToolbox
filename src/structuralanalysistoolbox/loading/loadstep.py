@@ -227,7 +227,6 @@ class LoadStep:
                           fixed=fixed)
             
         self.forces.append(force)
-        self.model._analysis.add_bc(force)
 
     def moment(self, nset : str | int, 
                      value : float,
@@ -343,7 +342,6 @@ class LoadStep:
                                 loaded_area=loaded_area) # defined in element type
 
         self.pressures.append(pressure)
-        self.model._analysis.add_bc(pressure)
         
     def displacement(self, nset : str, 
                      value : float = 0,
@@ -366,8 +364,7 @@ class LoadStep:
                                     operation=operation,
                                     ramping=ramping)
         
-        self.displacements.append(displacement)
-        self.model._analysis.add_bc(displacement)         
+        self.displacements.append(displacement)       
 
     def pretension(self):
         pass
@@ -479,7 +476,7 @@ class NonlinearControls:
 @dataclass
 class RestartControls:
     action : Literal["DEFINE", "NORESTART", "LINEAR", "DELETE"] = "DEFINE"
-    load_step : Literal["ALL", "LAST", "NONE"] | int = "LAST" # loadstep frequency
+    load_step : Literal["ALL", "LAST", "NONE"] | int = 1 # loadstep frequency
     frequency : Literal["NONE", "LAST"] | int = "LAST"  # substep frequency 
                                                         # negative integer for N equally spaced restart points
                                                         # positive integer for every Nth substep of a loadstep

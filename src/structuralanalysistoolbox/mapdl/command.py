@@ -489,7 +489,7 @@ def step_controls(mapdl: core.Mapdl, load_step: LoadStep):
     else: return # raise an exception
 
     # Load Step Time
-    #mapdl.time(load_step.step_controls.step_end_time)
+    mapdl.time(str(load_step.step_controls.step_end_time))
 
 def solver_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # Solver Type
@@ -513,10 +513,9 @@ def solver_controls(mapdl: core.Mapdl, load_step: LoadStep):
 
 def restart_controls(mapdl: core.Mapdl, load_step: LoadStep):
     
-    if load_step.restart_controls:
-        mapdl.rescontrol(action=load_step.restart_controls.action,
-                        ldstep=str(load_step.restart_controls.load_step),
-                        frequency=str(load_step.restart_controls.frequency))
+    mapdl.rescontrol(action=load_step.restart_controls.action,
+                    ldstep=str(load_step.restart_controls.load_step),
+                    frequency=str(load_step.restart_controls.frequency))
 
 def nonlinear_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # Newton-Raphson Option
@@ -626,23 +625,9 @@ def nonlinear_diagnostics(mapdl: core.Mapdl, load_step: LoadStep):
 def _load_step(mapdl: core.Mapdl, *args):
 
     load_step : LoadStep = args[0]
-    mapdl.slashsolu()
+
     mapdl.allsel() # !!!!
-
-    if load_step.status == "RESTART":       
-        mapdl.antype(status="RESTART", ldstep=load_step.step, substep=load_step.substep, action="RSTCREATE")
-        mapdl.solve()
-        
-        mapdl.finish()
-        mapdl.filname(load_step.filename)
-        mapdl.slashsolu()
-
-    # Set step status to NEW after restarting completed
-    load_step.status = "NEW"
-    load_step.substep = None
-    
     mapdl.antype(antype=load_step.analysis_type, status="NEW")
-
     step_controls(mapdl, load_step)
     solver_controls(mapdl, load_step)
     restart_controls(mapdl, load_step)
@@ -651,6 +636,7 @@ def _load_step(mapdl: core.Mapdl, *args):
     nonlinear_diagnostics(mapdl, load_step)
 
     # Cutback Controls
+    # mapdl.time # Time at the end of a load step
 
     ########################
     ### Load - BC
@@ -727,7 +713,6 @@ def _load_step(mapdl: core.Mapdl, *args):
                 mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="ON")
             else:
                 mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="OFF")
-
 
 def set_force(mapdl: core.Mapdl, force : Force):
     # Adjust direction syntax from stbox to MAPDL
@@ -828,6 +813,17 @@ def set_displacement(mapdl: core.Mapdl, displacement : Displacement):
 #### SOLUTION 
 #############################################
 
+def _restart(mapdl: core.Mapdl, *args):
+    mapdl.antype(status="RESTART", ldstep=args[0], substep=args[1], action="RSTCREATE")
+    pass
+
+def _change_job_name(mapdl: core.Mapdl, job_name : str):
+    mapdl.finish()
+    mapdl.filname(job_name)
+    
+def _change_directory(mapdl: core.Mapdl, path):
+    mapdl.cwd(path.as_posix())
+
 def _enter_solution(mapdl: core.Mapdl, *args):
     mapdl.slashsolu()
 
@@ -835,7 +831,6 @@ def _solve(mapdl: core.Mapdl, *args):
     mapdl.allsel()
     mapdl.solve()
     mapdl.save()
-    mapdl.finish()
 
 def _write_input_file(mapdl: core.Mapdl, *args):
     mapdl.cdwrite(option="DB", fname="model.cdb")
