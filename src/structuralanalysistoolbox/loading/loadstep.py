@@ -121,6 +121,14 @@ class LoadStep:
                     fixed : bool = False, **kwargs): ...
     @overload
     def force(self, nset : str, 
+                    value : None = None,
+                    direction : Literal["X", "Y", "Z"] | None = None,
+                    coordinate_system : None = None,
+                    applied_by : Literal["NODE SET"] = "NODE SET",
+                    operation : None = None, 
+                    ): ...
+    @overload
+    def force(self, nset : str, 
                     value : float | None = None,
                     direction : Literal["X", "Y", "Z"] | None = None,
                     coordinate_system : CoordinateSystem | None = None,
@@ -132,7 +140,7 @@ class LoadStep:
                     direction : Literal["X", "Y", "Z"] | None = None,
                     coordinate_system : CoordinateSystem | None = None,
                     applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "NODE SET",
-                    operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+                    operation : Literal["ADD", "NEW", "DELETE"] | None = "NEW", 
                     fixed : bool = False, **kwargs):
         """
             Force applied on the constant direction and onto initial surface area for 'surface forces'.

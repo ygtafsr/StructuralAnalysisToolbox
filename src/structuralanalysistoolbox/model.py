@@ -105,128 +105,27 @@ class Vector:
 class Analysis:
     
     def __init__(self, model):
-
         self.model : Model = model
-        self.ls_table : List[List[Force | Pressure | Moment | Displacement | None]] = []
 
-        """
-          LS-1    LS-2    LS-3
-        [ None,   None,   None ...]
-        [ None,   None,   None ...]
-         .
-         .
-         .
-        """
-
-    def add_new_row(self, step_number : int):
-        """Add new row full of 'None' up to new load step."""
-        self.ls_table.append([None for i in range(0, step_number)])
-        pass
-
-    def add_new_column(self):
-        for row in self.ls_table:
-            row.append(None)
-        pass
-
-    def check_columns(self, bc : Force | Moment | Pressure | Displacement) -> tuple[int, int] | None:
-        for row_idx, row in enumerate(self.ls_table):
-            for col_idx, cell in enumerate(row):
-                if cell == bc:
-                    return (row_idx, col_idx)
-        return None
-
-    def add_bc(self, bc : Force | Moment | Pressure | Displacement, step_number : int):
-        """ 
-        Adds a bc to the last load step. If there is a same scope for bc which is
-        already defined, then add the bc this row. Otherwise, adds a new scope row.
-        """
-        # Get bc scope and check its existence in ls_table
-        # If it exist then add bc end of the ls list of this scope line.
-        # Else, add_new_scope + add add bc end of the ls list of this scope line.
-        # Add a new bc object in any case that the bc is a continuation of a previous one or not.
-        # Continuity check is only important to decide using a new scope or a previous one.
-
-        #step_number = len(self.model._load_step_list)
-
-        if step_number == 1:
-            self.add_new_row(step_number)
-            self.ls_table[-1][-1] = bc
-        else:
-            if item := self.check_columns(bc):
-                self.ls_table[item[0]][step_number-1] = bc 
-            else:
-                self.add_new_row(step_number)
-                self.ls_table[-1][-1] = bc
-        pass
-
-    """def get_bc_history(self) -> pd.DataFrame:
-
-        self.ls_table.clear()
-
-        for ls in self.model._load_step_list:
-            self.add_new_column()
-            for force in ls.forces:
-                self.add_bc(force, ls.step_number)
-            for press in ls.pressures:
-                self.add_bc(press, ls.step_number)
-            for disp in ls.displacements:
-                self.add_bc(disp, ls.step_number)
-
-        def _bc_to_str(bc_obj: Force | Moment | Pressure | Displacement | None) -> str | None:
-            if bc_obj is None:
-                return None
-            if type(bc_obj) is Force:
-                scope = bc_obj.set.name
-                kind = "FORCE"
-            elif type(bc_obj) is Moment:
-                scope = bc_obj.set.name
-                kind = "MOMENT"
-            elif type(bc_obj) is Pressure:
-                scope = bc_obj.set.nset.name
-                kind = "PRESS"
-            elif type(bc_obj) is Displacement:
-                scope = bc_obj.set.name
-                kind = "DISP"
-            else:
-                scope = ""
-                kind = type(bc_obj).__name__.upper()
-            return f"{bc_obj.direction} : {bc_obj.value}"
-
-        if not self.ls_table:
-            return pd.DataFrame()
-
-        num_cols = max(len(row) for row in self.ls_table)
-        columns = [f"LS-{ls_no+1}" for ls_no in range(num_cols)]
-
-        data = []
-        index = []
-        for row_idx, row in enumerate(self.ls_table, start=1):
-            padded = list(row) + [None] * (num_cols - len(row))
-            data.append([_bc_to_str(cell) for cell in padded])
-
-            first = next((cell for cell in padded if cell is not None), None)
-            if first is None:
-                index.append(f"SCOPE-{row_idx}")
-            elif type(first) is Pressure:
-                index.append(f"PRESS : {first.set.nset.name}")
-            else:
-                index.append(f"{type(first).__name__.upper()} : {first.set.name}")
-
-        return pd.DataFrame(data=data, columns=columns, index=index)"""
-       
     def get_bc_history(self) -> pd.DataFrame:
-
 
         prev = None # previous load step reference for the load accumlutaion logic  
                     # It's going to be "None" only for the first step.
         load_history = {}
+        
         for ls in self.model._load_step_list:
             load_history[ls.name] = {}
 
             for force in ls.forces:
-                if prev != None and force.operation == "ADD":
-                    value = load_history[prev.name][("FORCE", force.set.name, force.direction)] + force.value # type:ignore
-                    load_history[ls.name][("FORCE", force.set.name, force.direction)] = value # type:ignore
+
+                if force.fixed:
+                    load_history[ls.name][("FORCE", force.set.name, force.direction)] = "FIXED" # type:ignore
+                elif prev != None and force.operation == "ADD":
+                    try:
+                        value = load_history[prev.name][("FORCE", force.set.name, force.direction)] + force.value # type:ignore
+                        load_history[ls.name][("FORCE", force.set.name, force.direction)] = value # type:ignore
+                    except KeyError: # In case, there is no previous BC like this!
+                        load_history[ls.name][("FORCE", force.set.name, force.direction)] = force.value # type:ignore
                 elif force.operation == "DELETE":
                     load_history[ls.name][("FORCE", force.set.name, force.direction)] = 0.0 # type:ignore
                 else:
@@ -847,7 +746,9 @@ class Model:
         ls_plot.plot()
 
     def bc_history(self) -> pd.DataFrame:
-        return self._analysis.get_bc_history()
+        df = self._analysis.get_bc_history()
+        df_pivoted = df.pivot_table(index=["Type", "Set Name", "Direction"], aggfunc='first')
+        return df_pivoted
 
 #####################
 ## MISC.
