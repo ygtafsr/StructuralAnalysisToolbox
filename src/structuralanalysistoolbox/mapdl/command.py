@@ -137,14 +137,15 @@ def _create_element_set(mapdl : core.Mapdl, elset : Elset):
         mapdl.components[elset.name] = "ELEM", elset.items # type: ignore
 
 @prep7
-def _create_surface(mapdl : core.Mapdl, *args):
+def _create_surface(mapdl : core.Mapdl, surf : model.Surface):
         
-    surf : model.Surface = args[0]
-
     mapdl.type(str(surf.element_type.midx))  # type: ignore
     mapdl.real(str(surf.real_constants.midx)) # type: ignore
     mapdl.mat(str(surf.material.midx)) # type: ignore
-    mapdl.esys(str(surf.csys.midx)) # type : ignore
+
+    # CS Implementation
+    if surf.element_type.pressure_cs == "LOCAL CS":
+        mapdl.esys(str(surf.csys.midx)) # type : ignore
 
     mapdl.nsel(type_= 'S', vmin = surf.nset.items) # type: ignore
     mapdl.esurf()
@@ -157,9 +158,9 @@ def _create_surface(mapdl : core.Mapdl, *args):
 ##########################################
 
 @prep7
-def _create_element_type(mapdl : core.Mapdl, *args):
+def _create_element_type(mapdl : core.Mapdl, etype : element.Etype):
     """Create the element type & Asssign Keyopts"""
-    etype = args[0]
+ 
     mapdl.et(etype.midx, ename=etype.name)
 
     for keyopt in etype.get_keyopts(): # keyopt :: (keyopt_id, value)
@@ -455,7 +456,7 @@ output_mapping = {
 #### LOAD STEP 
 #############################################
 
-
+## SOLUTION CONTROLS ##
 def step_controls(mapdl: core.Mapdl, load_step: LoadStep):
     # Time Stepping
     mapdl.autots(load_step.step_controls.auto_time_stepping)
@@ -619,15 +620,222 @@ def nonlinear_diagnostics(mapdl: core.Mapdl, load_step: LoadStep):
     
     mapdl.nldiag(label=load_step.contact_monitoring.function,
                  key=load_step.contact_monitoring.characteristics,
-                 maxfile=load_step.contact_monitoring.maxfile)
+                 maxfile=load_step.contact_monitoring.maxfile)    
+
+## LOADS & BC
+def sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system=None, loaded_area=None, reset=False):
+    """
+    Sets the SFCONTROL parameters for directional pressure/traction application.
+    """
+    kcsys = lcomp = val1 = val2 = val3 = ktaper = kuse = karea = kproj = kfollow = ''
+
+    if reset:
+        with mapdl.non_interactive:
+            mapdl.run(f"SFCONTROL, none") # Reset SFCONTROL
+        return
+
+    # :: LOAD DIRECTION DEFINITION ::
+    # Apply Pressure into Element Face Normals
+    if direction == "NORMAL TO":
+        kcsys = "0"
+        lcomp = "0"
+        val1 = "0"
+    # Apply Pressure with component directions
+    else: 
+        kcsys = "1" # Use local csys
+        if direction == "X":
+            lcomp = "0" # X
+        elif direction == "Y":
+            lcomp = "1" # Y     
+        elif direction == "Z":
+            lcomp = "2" # Z
+        val1 = str(coordinate_system.midx) # type: ignore
+
+    #ktaper:load magnitude
+    #kuse:load direction
+    #kproj: --skip-- (vector projection)
+    #kfollow: load follows or not el. deformation
+
+    # Loaded Area During Large Deformation
+    if loaded_area == "DEFORMED":
+        karea = "0"
+    else:
+        karea = "1" 
+
+    with mapdl.non_interactive:
+        mapdl.run(f"SFCONTROL,{kcsys},{lcomp},{val1},{val2},{val3},{ktaper},{kuse},{karea},{kproj},{kfollow}")
+
+def force_to_nset(mapdl: core.Mapdl, force : Force):
+
+    if force.operation == "NEW":
+        mapdl.fcum(oper="REPL") # stbox = new (replace previous force value)
+        mapdl.csys(force.csys.midx)
+        mapdl.f(node=force.set.name, lab=f"F{force.direction}", value=str(force.value))
+        mapdl.csys("0") # Reset CS
+        mapdl.fcum() # reset force accumulation
+    elif force.operation == "ADD":
+        mapdl.fcum(oper="ADD") # stbox = add (add to previous force value)
+        mapdl.csys(force.csys.midx)
+        mapdl.f(node=force.set.name, lab=f"F{force.direction}", value=str(force.value))
+        mapdl.csys("0") # Reset CS
+        mapdl.fcum() # reset force accumulation
+    elif force.operation == "DELETE":
+        if force.fixed: # Node set force fix logic::
+            mapdl.fdele(node=str(force.set), lab=f"F{force.direction}", lkey="FIXED")
+        else:
+            mapdl.fdele(node=str(force.set), lab=f"F{force.direction}")  
+
+def force_to_elface(mapdl: core.Mapdl, force : Force):
+
+    if force.operation == "NEW":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL")
+        mapdl.sfcum(oper="REPL") # stbox = new (replace previous force value)
+        sfcontrol(mapdl=mapdl, direction=force.direction, coordinate_system=force.csys, loaded_area="INITIAL")
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
+        sfcontrol(mapdl=mapdl, reset=True) # Deactivate sfcontrol. Otherwise, it remain active for all subsequent surface load definitions.
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel() # Reset selections
+    elif force.operation == "ADD":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL")
+        mapdl.sfcum(oper="ADD") # stbox = new (replace previous force value)
+        sfcontrol(mapdl=mapdl, direction=force.direction, coordinate_system=force.csys, loaded_area="INITIAL")
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
+        sfcontrol(mapdl=mapdl, reset=True) # Deactivate sfcontrol. Otherwise, it remain active for all subsequent surface load definitions.
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel() # Reset selections
+    elif force.operation == "DELETE":
+        mapdl.sfdele(nlist=force.set.name, lab="PRES")
+
+def force_to_surfel(mapdl: core.Mapdl, force : Force):
     
+    if force.operation == "NEW":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        #mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(force.set.etype.midx)) # type: ignore
+        mapdl.sfcum(oper="REPL") # stbox = new (replace previous force value)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif force.operation == "ADD":
+        area = get_surface_area(mapdl, force.set)
+        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
+        #mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(force.set.etype.midx)) # type: ignore
+        mapdl.sfcum(oper="ADD") # stbox = new (replace previous force value)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif force.operation == "DELETE":
+        mapdl.sfdele(nlist=force.set.name, lab="PRES")
 
-def _load_step(mapdl: core.Mapdl, *args):
+def pressure_to_nset(mapdl: core.Mapdl, pressure : Pressure):
+    if pressure.operation == "NEW":
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.sfcum(oper="REPL") # stbox = new (replace previous force value)
+        mapdl.sf(nlist="ALL", lab="PRES", value=str(pressure.value))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif pressure.operation == "ADD":
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.sfcum(oper="ADD") # stbox = new (replace previous force value)
+        mapdl.sf(nlist="ALL", lab="PRES", value=str(pressure.value))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif pressure.operation == "DELETE":
+        mapdl.sfdele(nlist=pressure.set.name, lab="PRES")
 
-    load_step : LoadStep = args[0]
+def pressure_to_elface(mapdl: core.Mapdl, pressure : Pressure):
+    if pressure.operation == "NEW":
+        # Select surface nodes by nset
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL") # Select element only if all of its nodes are in the selected nodal set
+        mapdl.sfcum(oper="REPL") # stbox = new (replace previous force value)
+        sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system=pressure.csys, loaded_area=pressure.loaded_area)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+        sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel() # Reset selections        
+    elif pressure.operation == "ADD":
+        # Select surface nodes by nset
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.esln(type_='S', ekey="0", nodetype="ALL") # Select element only if all of its nodes are in the selected nodal set
+        mapdl.sfcum(oper="ADD") # stbox = new (replace previous force value)
+        sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system=pressure.csys, loaded_area=pressure.loaded_area)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+        sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel() # Reset selections 
+    elif pressure.operation == "DELETE":
+        mapdl.sfdele(nlist=pressure.set.name, lab="PRES")
+
+def pressure_to_surfel(mapdl: core.Mapdl, pressure : Pressure):
+    if pressure.operation == "NEW":
+        # Selecet elements by type id
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(pressure.set.element_type.midx)) # type: ignore
+        mapdl.sfcum(oper="REPL") # stbox = new (replace previous force value)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif pressure.operation == "ADD":
+        # Selecet elements by type id
+        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
+        mapdl.esel(type_='S', item="type", vmin=str(pressure.set.element_type.midx)) # type: ignore
+        mapdl.sfcum(oper="ADD") # stbox = new (replace previous force value)
+        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
+        mapdl.sfcum() # Reset force accumulation
+        mapdl.allsel()
+    elif pressure.operation == "DELETE":
+        mapdl.sfdele(nlist=pressure.set.name, lab="PRES")
+
+
+
+    # Pressure Application Methods ::
+    # 1) Pressure with Node Selection :: SF Command
+    # 2) Pressure with Surface Element Selection :: SFE Command after ESEL
+    # 3) Pressure with Element Faces :: SFE Command
+
+def displacement_to_nset(mapdl: core.Mapdl, displacement : Displacement):
+
+    # Adjust direction syntax from stbox to MAPDL
+    direction : str
+    if displacement.direction == "ALL": direction = displacement.direction
+    elif displacement.direction in ("X", "Y", "Z"): direction = f"U{displacement.direction}"
+    elif displacement.direction in ("RX", "RY", "RZ"): direction = f"ROT{displacement.direction[1]}"
+
+    if displacement.operation == "NEW":
+        mapdl.dcum(oper="REPL")
+        mapdl.csys(displacement.csys.midx)
+        mapdl.d(node=displacement.set.name, lab=direction, value=str(displacement.value))
+        mapdl.csys(0)
+        mapdl.dcum()
+        mapdl.allsel()
+    elif displacement.operation == "ADD":
+        mapdl.dcum(oper="ADD")
+        mapdl.csys(displacement.csys.midx)
+        mapdl.d(node=displacement.set.name, lab=direction, value=str(displacement.value))
+        mapdl.csys(0)
+        mapdl.dcum()
+        mapdl.allsel()
+    elif displacement.operation == "DELETE":
+        if displacement.ramping:
+            mapdl.ddele(node=str(displacement.set.items), lab=direction, rkey="ON")
+        else:
+            mapdl.ddele(node=str(displacement.set.items), lab=direction, rkey="OFF")
+
+## LOAD STEP
+def _load_step(mapdl: core.Mapdl, load_step : LoadStep):
 
     mapdl.allsel() # !!!!
     mapdl.antype(antype=load_step.analysis_type, status="NEW")
+
     step_controls(mapdl, load_step)
     solver_controls(mapdl, load_step)
     restart_controls(mapdl, load_step)
@@ -652,22 +860,12 @@ def _load_step(mapdl: core.Mapdl, *args):
         mapdl.kbc(key=str(1))
 
     for force in load_step.forces:
-        # Adjust direction syntax from stbox to MAPDL
-        _direction = f"F{force.direction}"
-
-        if force.operation == "NEW":
-            mapdl.fcum(oper="REPL") # stbox = new (replace previous force value)
-            set_force(mapdl, force)
-            mapdl.fcum() # reset force accumulation
-        elif force.operation == "ADD":
-            mapdl.fcum(oper="ADD") # stbox = add (add to previous force value)
-            set_force(mapdl, force)
-            mapdl.fcum() # reset force accumulation
-        elif force.operation == "DELETE":
-            if force.fixed:
-                mapdl.fdele(node=str(force.set), lab=_direction, lkey="FIXED")
-            else:
-                mapdl.fdele(node=str(force.set), lab=_direction)
+        if force.applied_by == "NODE SET":
+            force_to_nset(mapdl, force)
+        elif force.applied_by == "ELEMENT FACES":
+            force_to_elface(mapdl, force)
+        elif force.applied_by == "SURFACE ELEMENTS":
+            force_to_surfel(mapdl, force)
 
     for moment in load_step.moments:
 
@@ -684,145 +882,25 @@ def _load_step(mapdl: core.Mapdl, *args):
                 mapdl.fdele(node=force[0], lab=f"F{force[1]}")
 
     for pressure in load_step.pressures: 
-        if pressure.operation == "NEW":
-            mapdl.sfcum(lab="PRES", oper="REPL")
-            set_pressure(mapdl, pressure)
-            #mapdl.sfcum() # Reset
-        elif pressure.operation == "ADD":
-            mapdl.sfcum(lab="PRES", oper="ADD")
-            set_pressure(mapdl, pressure)
-            #mapdl.sfcum() # Reset
-        elif pressure.operation == "DELETE":
-            mapdl.sfdele(nlist=str(pressure.set.nset), lab="PRES")
+        if pressure.applied_by == "ELEMENT FACES":
+            pressure_to_elface(mapdl, pressure)
+        elif pressure.applied_by == "SURFACE ELEMENTS":
+            pressure_to_surfel(mapdl, pressure)
             
     for displacement in load_step.displacements:
-        # Adjust direction syntax from stbox to MAPDL
-        _direction : str
-        if displacement.direction == "ALL": _direction = displacement.direction
-        elif displacement.direction in ("X", "Y", "Z"): _direction = f"U{displacement.direction}"
-        elif displacement.direction in ("RX", "RY", "RZ"): _direction = f"ROT{displacement.direction[1]}"
+        displacement_to_nset(mapdl, displacement)
 
-        if displacement.operation == "NEW":
-            mapdl.dcum(oper="REPL")
-            set_displacement(mapdl, displacement)
-        elif displacement.operation == "ADD":
-            mapdl.dcum(oper="ADD")
-            set_displacement(mapdl, displacement)
-        elif displacement.operation == "DELETE":
-            if displacement.ramping:
-                mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="ON")
-            else:
-                mapdl.ddele(node=str(displacement.set.items), lab=_direction, rkey="OFF")
-
-def set_force(mapdl: core.Mapdl, force : Force):
-    # Adjust direction syntax from stbox to MAPDL
-    _direction = f"F{force.direction}"
-    if force.applied_by == "NODE SET":
-        mapdl.csys(force.csys.midx)
-        mapdl.f(node=force.set.name, lab=_direction, value=str(force.value))
-    elif force.applied_by == "ELEMENT FACES":
-        area = get_surface_area(mapdl, force.set)
-        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
-        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
-        mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
-        _sfcontrol(mapdl=mapdl, direction=_direction, coordinate_system=force.csys, loaded_area="INITIAL")
-        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure))
-        _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
-    elif force.applied_by == "SURFACE ELEMENTS":
-        area = get_surface_area(mapdl, force.set)
-        pressure = force.value / area # Convert Force to Surface Traction (Pressure)
-        mapdl.nsel(type_='S', vmin=force.set.nset.items) # type: ignore
-        mapdl.esel(type_='S', item="type", vmin=str(force.set.etype.midx)) # type: ignore
-        mapdl.sfe(elem="ALL", lab="PRES", val1=str(force.value))
-
-    #_reset_attributes(mapdl)
-    mapdl.allsel() # Reset selection after force application
-
-def _sfcontrol(mapdl: core.Mapdl, direction=None, coordinate_system=None, loaded_area=None, reset=False):
-    """
-    Sets the SFCONTROL parameters for directional pressure/traction application.
-    """
-    kcsys = lcomp = val1 = val2 = val3 = ktaper = kuse = karea = kproj = kfollow = ''
-
-    if reset:
-        with mapdl.non_interactive:
-            mapdl.run(f"SFCONTROL, none") # Reset SFCONTROL
-        return
-
-    if direction == "NORMAL TO":
-        kcsys = "0"
-        lcomp = "0"
-        val1 = "0" # use global CSYS
-    else: # Apply Pressure with component directions
-        kcsys = "1"
-        if direction == "X":
-            lcomp = "0" # X
-        elif direction == "Y":
-            lcomp = "1" # Y     
-        elif direction == "Z":
-            lcomp = "2" # Z
-        #mapdl.csys(coordinate_system_id)
-        val1 = str(coordinate_system.midx) # type: ignore
-
-    if loaded_area == "DEFORMED":
-        karea = "0"
-    else:
-        karea = "1" 
-
-    with mapdl.non_interactive:
-        mapdl.run(f"SFCONTROL,{kcsys},{lcomp},{val1},{val2},{val3},{ktaper},{kuse},{karea},{kproj},{kfollow}")
-
-def set_pressure(mapdl: core.Mapdl, pressure : Pressure):
-
-    # Pressure Application Methods ::
-    # 1) Pressure with Node Selection :: SF Command
-    # 2) Pressure with Surface Element Selection :: SFE Command after ESEL
-    # 3) Pressure with Element Faces :: SFE Command
-    if pressure.applied_by == "NODE SET":
-        # Select surface nodes by nset
-        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
-        mapdl.sf(nlist="ALL", lab="PRES", value=str(pressure.value))
-    elif pressure.applied_by == "ELEMENT FACES":
-        # Select surface nodes by nset
-        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
-        # Select element only if all of its nodes are in the selected nodal set
-        mapdl.esln(type_='S', ekey="0", nodetype="ALL") 
-        _sfcontrol(mapdl=mapdl, direction=pressure.direction, coordinate_system=pressure.csys, loaded_area=pressure.loaded_area)
-        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
-        _sfcontrol(mapdl=mapdl, reset=True) # Reset SFCONTROL after SFE command
-    elif pressure.applied_by == "SURFACE ELEMENTS":
-        # Selecet elements by type id
-        mapdl.nsel(type_='S', vmin=pressure.set.nset.items) # type: ignore
-        mapdl.esel(type_='S', item="type", vmin=str(pressure.set.element_type.midx)) # type: ignore
-        #mapdl.csys(pressure.coordinate_system_id)
-        mapdl.sfe(elem="ALL", lab="PRES", val1=str(pressure.value))
-
-    mapdl.csys(0) # Reset to global CSYS
-    mapdl.allsel() # Reset selection after surface load application
-
-def set_displacement(mapdl: core.Mapdl, displacement : Displacement):
-    # Adjust direction syntax from stbox to MAPDL
-    _direction : str
-    if displacement.direction == "ALL": _direction = displacement.direction
-    elif displacement.direction in ("X", "Y", "Z"): _direction = f"U{displacement.direction}"
-    elif displacement.direction in ("RX", "RY", "RZ"): _direction = f"ROT{displacement.direction[1]}"
-    mapdl.d(node=displacement.set.name, lab=_direction, value=str(displacement.value))
-    mapdl.allsel()
 
 #############################################
 #### SOLUTION 
 #############################################
 
-def _restart(mapdl: core.Mapdl, *args):
-    mapdl.antype(status="RESTART", ldstep=args[0], substep=args[1], action="RSTCREATE")
-    pass
-
-def _change_job_name(mapdl: core.Mapdl, job_name : str):
-    mapdl.finish()
-    mapdl.filname(job_name)
-    
-def _change_directory(mapdl: core.Mapdl, path):
-    mapdl.cwd(path.as_posix())
+def _restart(mapdl: core.Mapdl, step : LoadStep, substep : int, action : str):
+    mapdl.antype(status="RESTART", ldstep=str(step.step_number), substep=str(substep), action=action)
+    ## Add load step objetc
+    mapdl.allsel()
+    mapdl.solve()
+    mapdl.save()
 
 def _enter_solution(mapdl: core.Mapdl, *args):
     mapdl.slashsolu()

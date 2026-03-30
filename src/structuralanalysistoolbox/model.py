@@ -35,10 +35,7 @@ from structuralanalysistoolbox.exceptions import ParameterError
 [3] Restart Analysis:
     Solve method looks up model._load_step_list starting from the last loadstep to
     find out the load step with a restart option and only run this loadstep.
-
-
 """
-
 
 @dataclass
 class Nset:
@@ -162,7 +159,7 @@ class Analysis:
                 self.ls_table[-1][-1] = bc
         pass
 
-    def get_bc_history(self) -> pd.DataFrame:
+    """def get_bc_history(self) -> pd.DataFrame:
 
         self.ls_table.clear()
 
@@ -215,8 +212,41 @@ class Analysis:
             else:
                 index.append(f"{type(first).__name__.upper()} : {first.set.name}")
 
-        return pd.DataFrame(data=data, columns=columns, index=index)
+        return pd.DataFrame(data=data, columns=columns, index=index)"""
        
+    def get_bc_history(self) -> pd.DataFrame:
+
+
+        prev = None # previous load step reference for the load accumlutaion logic  
+                    # It's going to be "None" only for the first step.
+        load_history = {}
+        for ls in self.model._load_step_list:
+            load_history[ls.name] = {}
+
+            for force in ls.forces:
+                if prev != None and force.operation == "ADD":
+                    value = load_history[prev.name][("FORCE", force.set.name, force.direction)] + force.value # type:ignore
+                    load_history[ls.name][("FORCE", force.set.name, force.direction)] = value # type:ignore
+                elif force.operation == "DELETE":
+                    load_history[ls.name][("FORCE", force.set.name, force.direction)] = 0.0 # type:ignore
+                else:
+                    load_history[ls.name][("FORCE", force.set.name, force.direction)] = force.value # type:ignore
+                # Fixed Force Logic might be implemented later !!
+
+            for press in ls.pressures:
+                load_history[ls.name][("PRESSURE", press.set.nset.name, press.direction)] = press.value # type:ignore
+            for disp in ls.displacements:
+                load_history[ls.name][("DISPLACEMENT", disp.set.name, disp.direction)] = disp.value # type:ignore
+            prev = ls
+
+        ls_df = pd.DataFrame(load_history)
+        ls_df.index.names = ['Type', 'Set Name', 'Direction']
+        if not ls_df.empty:
+            ls_df.iloc[:, 0] = ls_df.iloc[:, 0].fillna(0.0)
+            ls_df = ls_df.ffill(axis=1)
+
+        return ls_df
+    
 class Model:
 
     def __init__(self, name = '',
@@ -873,9 +903,8 @@ class Model:
             if isinstance(tree[key], dict):
                 self._print_model_tree(tree[key], next_indent)
 
-#####################
+
 ## EXECUTION
-#####################
 
     def _add_command(self, func_name : str, *args):
         """
@@ -982,42 +1011,28 @@ class Model:
     def solve(self, status : Literal["NEW", "RESTART"] = "NEW"): ...
     @overload
     def solve(self, status : Literal["NEW", "RESTART"] = "RESTART", 
-              step : int = 1, substep : int = 1): ...
+              step : int = 0, substep : int = 0,
+              action : Literal["CONTINUE", "ENDSTEP", "RSTCREATE"] = "RSTCREATE"): ...
     def solve(self,
               status : Literal["NEW", "RESTART"] = "NEW",
-              step : int = 0, substep : int = 0):
+              step : int = 0, substep : int = 0,
+              action : Literal["CONTINUE", "ENDSTEP", "RSTCREATE"] = "RSTCREATE"):
         
-        
-
         if status == "RESTART":
 
-            # !!! Be careful that for _load_step_list[step] indicate loadstep-2 for step parameter 1 !!!
-            self._load_step_list[step].status = "RESTART"
-            self._load_step_list[step].substep = substep          
-
-            timestamp = datetime.now().strftime("%d.%m.%Y-%H.%M.%S")
-            folder_name = f"Restart-LS{self._load_step_list[step].step_number}-{timestamp}"
-            self._load_step_list[step].filename = f'Restart-{self._load_step_list[step].name}'
-            self.target_dir = self.working_dir / folder_name
-            self.target_dir.mkdir(exist_ok=True)
-
-            self._add_command("_enter_solution") # Enter once for multistep analysis !!!
-            self._add_command("_restart", step, substep)
-            self._add_command("_solve")
-            self._add_command("_change_job_name", self._load_step_list[step].filename)
-            self._add_command("_enter_solution") # Enter once for multistep analysis !!!
+            if step == 0: step = '' #type: ignore
+            if substep == 0: substep = '' #type: ignore
+            self._add_command("_enter_solution")
+            self._add_command("_restart", self._load_step_list[step-1], substep, action)
+    
             for load_step in self._load_step_list[step:]:
                 self._add_command("_load_step", load_step)
                 self._add_command("_solve")
             self._add_command("_exit_mapdl")
 
-            # Move files
-            if self.target_dir != self.working_dir: # This is not equal in case of a restart analysis
-                self._move_solution_files(self._load_step_list[step].filename, self.target_dir)
         else:
             self.working_dir = self._current_path / self.folder_name
             self.working_dir.mkdir()
-            self.target_dir = self.working_dir # For possible restart files movement
 
             self._create_command_pipeline()
             self._add_command("_enter_solution") # Enter once for multistep analysis !!!
@@ -1028,19 +1043,6 @@ class Model:
         
         self._execute_commands(True)
         self._command_pipeline.clear()
-
-
-        
-
-    def _move_solution_files(self, filename, target_dir):
-        from pathlib import Path
-        import shutil
-
-        source_dir = Path(self.working_dir)
-        target_dir.mkdir(exist_ok=True)
-
-        for file in source_dir.glob(f"{filename}*"):
-            shutil.move(str(file), target_dir / file.name)
 
     def write_input_file(self):
         self._create_command_pipeline()

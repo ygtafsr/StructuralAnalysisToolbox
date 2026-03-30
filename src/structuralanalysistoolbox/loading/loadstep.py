@@ -13,16 +13,14 @@ if TYPE_CHECKING:
     from structuralanalysistoolbox.model import Nset, Elset, Surface, CoordinateSystem, Vector, Analysis, Model
 
 """
-NONLINEAR OPTIONS:
+## NONLINEAR OPTIONS:
 NEQIT : Specifies the max num. of eq. iter. per substep.
 CNVTOL : Specifies convergence tolerances.
 NCNV : Provides options for terminating analysis.
 CUTCONTROL,Lab,VALUE,Option
 Controls time-step cutback during a nonlinear solution.
-"""
 
-"""
-OUTPUT CONTROLS:
+## OUTPUT CONTROLS:
 OUTRES : Controls what the program writes to the OUTRES database and results file
          and how often it is written.
 OUTPR : Controls what is printed (written to the solution OUTPR output file, (Jobname.OUT) and how
@@ -31,61 +29,45 @@ OUTGEOM : Controls the type of geometry data the program writes to the results f
 ERESX : enables you to review element integration point values in the postprocessor.
 """
 
-"""
-CREATING MULTIPLE LOAD STEPs
-
-"""
 @dataclass
 class Force:
-    set : Nset | Surface
-    value : float = field(compare=False)
-    direction : Literal["X", "Y", "Z"]
+    set : Nset | Surface | None = None
+    value : float | None = None
+    direction : Literal["X", "Y", "Z"] | None = None
     csys : CoordinateSystem | None = None
     applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "NODE SET"
-    operation : Literal["ADD", "NEW", "DELETE"] = field(default= "NEW", compare=False)
-    fixed : bool = field(default= False, compare=False)
-
-    def get_scope(self) -> tuple:
-        return (self.set.name)
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    fixed : bool = False
 
 @dataclass
 class Moment:
     set : Surface 
-    value : float = field(compare=False)
-    direction : Literal["RX", "RY", "RZ"]
+    value : float | None = None
+    direction : Literal["RX", "RY", "RZ"] | None = None
     csys : CoordinateSystem | None = None
     behavior : Literal["Rigid", "Deformable", "Coupled", "Beam"] = "Rigid"
-    operation : Literal["ADD", "NEW", "DELETE"] = field(default= "NEW", compare=False)
-    fixed : bool = field(default= False, compare=False)
-
-    def get_scope(self) -> tuple:
-        return (type(self), self.set.nset.name, self.set.type)
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
+    fixed : bool = False
 
 @dataclass
 class Pressure:
-    set : Surface
-    value : float = field(compare=False)
+    set : Surface | None = None
+    value : float | None = None
     direction : Literal["X", "Y", "Z", "NORMAL TO"] = "NORMAL TO"
     csys : CoordinateSystem | None = None
     applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "SURFACE ELEMENTS"
-    operation : Literal["ADD", "NEW", "DELETE"] = field(default= "NEW", compare=False)
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
     loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED"
-
-    def get_scope(self) -> tuple:
-        return (type(self), self.set.nset.name, self.set.type)
     
 @dataclass
 class Displacement:
     set : Nset 
-    value : float = field(compare=False)
-    direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"]
+    value : float | None = None
+    direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"] | None = None
     csys : CoordinateSystem | None = None
-    operation : Literal["ADD", "NEW", "DELETE"] = field(default= "NEW", compare=False)
+    operation : Literal["ADD", "NEW", "DELETE"] = "NEW"
     ramping : bool = False
-
-    def get_scope(self) -> tuple:
-        return (type(self), self.set.name)
-
+       
 
 class LoadStep:
     
@@ -128,106 +110,127 @@ class LoadStep:
         self.displacements : list[Displacement] = []
         self.outputs : list = []
 
+
+    @overload
     def force(self, nset : str, 
-                    value : float,
-                    direction : Literal["X", "Y", "Z"],
+                    value : float | None = None,
+                    direction : Literal["X", "Y", "Z"] | None = None,
+                    coordinate_system : CoordinateSystem | None = None,
+                    applied_by : Literal["NODE SET"] = "NODE SET",
+                    operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+                    fixed : bool = False, **kwargs): ...
+    @overload
+    def force(self, nset : str, 
+                    value : float | None = None,
+                    direction : Literal["X", "Y", "Z"] | None = None,
+                    coordinate_system : CoordinateSystem | None = None,
+                    applied_by : Literal["ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES",
+                    operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
+                    **kwargs): ...
+    def force(self, nset : str, 
+                    value : float | None = None,
+                    direction : Literal["X", "Y", "Z"] | None = None,
                     coordinate_system : CoordinateSystem | None = None,
                     applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "NODE SET",
                     operation : Literal["ADD", "NEW", "DELETE"] = "NEW", 
-                    fixed : bool = False):
+                    fixed : bool = False, **kwargs):
         """
-           NEW :: Replace previous Force, apply the new one.
-           ADD :: Apply the new load onto the previous one.
+            Force applied on the constant direction and onto initial surface area for 'surface forces'.
+            NEW :: Replace previous Force, apply the new one.
+            ADD :: Apply the new load in addition to the previous one.
+            DELETE :: Deletes loads on nset
+            FIXED :: Displacement on the specified dof is locked. (Only valid for the forces is applied by "NODE SET")
         """
 
-        if not (_nset := self.model.get_nset(nset)):
+        # Check whether nset is exist.
+        _nset = self.model.get_nset(nset)
+        if not _nset:
             raise ParameterError(f"Nset {nset} not found!")
-        
-        force : Force
         
         if applied_by == "NODE SET":
 
-            csys : CoordinateSystem
+            # If there is no csys given, use global cartesian by default. 
             if coordinate_system:
                 csys = coordinate_system
             else:
                 csys = self.model.get_coordinate_system("Cartesian")
 
-            force = Force(set=_nset, 
-                          value=value,
-                          csys=csys,
-                          direction=direction, 
-                          applied_by=applied_by,
-                          operation=operation, 
-                          fixed=fixed)
-
+            force = Force(_nset, value, direction, csys, applied_by, operation, fixed)
+            self.forces.append(force)
+            
         elif applied_by == "ELEMENT FACES":
             # SFE (through "Element Faces")
 
-            surf : Surface
-            # Check scope existence
-            if self.model._get_surface(nset, applied_by):
-                surf = self.model._get_surface(nset, applied_by)
-            else: # Create a new surface scope
-                surf = self.model._add_surface(nset=nset, 
-                                              name=f"Surf_{nset}", 
-                                              surface_type="Element Face",
-                                              ignore_at_execution=True)
-  
-            csys : CoordinateSystem
             if coordinate_system:
                 csys = coordinate_system
             else:
                 csys = self.model.add_coordinate_system(show_in_model_tree=False)
-                                
-            force = Force(set=surf,
-                          value=value, 
-                          direction=direction, 
-                          csys=csys,
-                          applied_by=applied_by, 
-                          operation=operation, 
-                          fixed=fixed)
+
+            # If surface is already exist, use is. If not, create new one.
+            surf = self.model._get_surface(nset, applied_by)
+            if not surf:
+                surf = self.model._add_surface(nset=nset, 
+                                               surface_type="ELEMENT FACES",
+                                               ignore_at_execution=True)
+            
+            force = Force(_nset, value, direction, csys, applied_by, operation, fixed)
+            self.forces.append(force)
             
         elif applied_by == "SURFACE ELEMENTS":
             # Apply through Pressure on Surface Elements
             
-            surf : Surface
-            csys : CoordinateSystem
-            # Check scope existence
-            if self.model._get_surface(nset, applied_by):
-                surf = self.model._get_surface(nset, applied_by)
-            else:
-                etype_154 = element.Surf154() 
-                
-                etype_154.large_deflection_area = "ORIGINAL AREA"
-                etype_154.midside_nodes = "INCLUDE"
-                etype_154.pressure_cs = "LOCAL CS"
+            # Coordinate System Implementation::
+            # 1) Element CS (Default):
+            #       Element CS Rotates with the element
+            #       Pressure direction rotates with the structure.
+            #       Large deformation -> Follower pressure
+            # 2) User Defined CS:
+            #       The load does not rotate with the element.
+            #       Pressure direction is fixed.
+            #       Define local CS + assign it to the element using ESYS
 
-                if coordinate_system:
+            # If surface is already exist, use is. If not, create new one.
+            surf = self.model._get_surface(nset, "SURFACE ELEMENTS")
+            if not surf:
+                # Element Type Selection::
+                if kwargs and kwargs["element_type"]:
+                    # Possible Types:
+                    if kwargs["element_type"] == "Surf154":
+                        surface_element = element.Surf154()
+                    elif kwargs["element_type"] == "Surf153":
+                        surface_element = element.Surf153()
+                    elif kwargs["element_type"] == "Surf156":
+                        surface_element = element.Surf156()
+                    elif kwargs["element_type"] == "Surf159":
+                        surface_element = element.Surf159()
+                    elif kwargs["element_type"] == "Follw201":
+                        surface_element = element.Follw201()
+                    surface_element = element.Surf154() # Default
+                else:
+                    surface_element = element.Surf154() # Default
+
+                surface_element.large_deflection_area = "ORIGINAL AREA"
+                surface_element.midside_nodes = "INCLUDE"
+
+                surface_element.pressure_cs = "LOCAL CS"
+                if coordinate_system: # User defined cs -> Fixed pressure
                     csys = coordinate_system
                 else:
                     csys = self.model.add_coordinate_system(show_in_model_tree=False)
-
+                
                 real = attributes.Real(ignore_at_execution=True) # Create empty attribute
                 mat = attributes.Mat(ignore_at_execution=True) # Create empty attribute
-                
                 surf = self.model._add_surface(nset=nset,  
-                                               surface_type=applied_by,
-                                               etype=etype_154,
+                                               surface_type="SURFACE ELEMENTS",
+                                               etype=surface_element,
                                                real_constants=real,
                                                material=mat,
                                                coordinate_system=csys)
+            else: csys = surf.csys
 
-            force = Force(set=surf,
-                          value=value, 
-                          direction=direction, 
-                          csys=csys, 
-                          applied_by=applied_by,
-                          operation=operation, 
-                          fixed=fixed)
+            force = Force(_nset, value, direction, csys, applied_by, operation, fixed)
+            self.forces.append(force)
             
-        self.forces.append(force)
-
     def moment(self, nset : str | int, 
                      value : float,
                      direction : Literal["RX", "RY", "RZ"], 
@@ -240,111 +243,108 @@ class LoadStep:
         if direction in ("RX", "RY", "RZ"):
             self.moments.append((nset, direction, value, operation, fixed))
 
-    def pressure(self, nset : str,  
+    @overload
+    def pressure(self, 
+                 nset : str, 
+                 *,
+                 operation : Literal["DELETE"] = "DELETE"): ...
+    @overload
+    def pressure(self, 
+                 nset : str,  
                  value : float,
                  direction : Literal["X", "Y", "Z", "NORMAL TO"] = "NORMAL TO",
                  coordinate_system : CoordinateSystem | None = None,
-                 applied_by : Literal["NODE SET", "ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES",  # Apply through "surface elements"
-                 loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED",                                                                                            # Direct Apply through "element surfaces"   
-                 operation : Literal["ADD", "NEW", "DELETE"] = "NEW"):    # ADD: add to the existing pressure (SFCUM::ADD)
-                                                                          # NEW: overwrite the existing pressure (SFCUM::REPL)
-                                                                          # DELETE: remove the pressure (SFDELE)
+                 applied_by : Literal["ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES",
+                 loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED",
+                 operation : Literal["ADD", "NEW"] = "NEW"): ...
+    def pressure(self, 
+                 nset : str,  
+                 value : float | None = None,
+                 direction : Literal["X", "Y", "Z", "NORMAL TO"] = "NORMAL TO",
+                 coordinate_system : CoordinateSystem | None = None,
+                 applied_by : Literal["ELEMENT FACES", "SURFACE ELEMENTS"] = "ELEMENT FACES",
+                 loaded_area : Literal["INITIAL", "DEFORMED"] = "DEFORMED",
+                 operation : Literal["ADD", "NEW", "DELETE"] = "NEW", **kwargs):    
+        
+        # Check whether nset is exist.
+        _nset = self.model.get_nset(nset)
+        if not _nset:
+            raise ParameterError(f"Nset {nset} not found!")
 
-        pressure : Pressure
-
-        if applied_by == "NODE SET":
-
-            surf : Surface
-            # Check scope existence
-            if self.model._get_surface(nset, applied_by):
-                surf = self.model._get_surface(nset, applied_by)
-            else: # Create a new surface scope
-                surf = self.model._add_surface(nset=nset,
-                                               surface_type="NODE SET",
-                                               ignore_at_execution=True)
-           
-            pressure = Pressure(set=surf, 
-                                value=value, 
-                                direction="NORMAL TO",
-                                applied_by=applied_by, 
-                                operation=operation, 
-                                loaded_area="INITIAL") # Check this
-            
-        elif applied_by == "ELEMENT FACES":
+        if applied_by == "ELEMENT FACES":
             # SFE (through "Element Faces")
             
-            surf : Surface
-            # Check scope existence
-            if self.model._get_surface(nset, applied_by):
-                surf = self.model._get_surface(nset, applied_by)
-            else: # Create a new surface scope
-                surf = self.model._add_surface(nset=nset, 
-                                              surface_type=applied_by,
-                                              ignore_at_execution=True)
-
-            csys : CoordinateSystem
             if direction in ("X", "Y", "Z"):
                 if coordinate_system:
                     csys = coordinate_system
                 else:
                     csys = self.model.add_coordinate_system(show_in_model_tree=False)
-                    
-            pressure = Pressure(set=surf, 
-                                value=value, 
-                                csys=csys,
-                                direction=direction,
-                                applied_by=applied_by, 
-                                operation=operation, 
-                                loaded_area=loaded_area)
-                  
+            else: csys = None
+
+            # If surface is already exist, use is. If not, create new one.
+            surf = self.model._get_surface(nset, applied_by)
+            if not surf:
+                surf = self.model._add_surface(nset=nset, 
+                                               surface_type="ELEMENT FACES",
+                                               ignore_at_execution=True)
+
+            pressure = Pressure(surf, value, direction, csys, applied_by, operation, loaded_area)
+            self.pressures.append(pressure)
+
         elif applied_by == "SURFACE ELEMENTS": 
 
-            surf : Surface | None
-            # Check scope existence
-            if self.model._get_surface(nset, applied_by):
-                surf = self.model._get_surface(nset, applied_by)
-            else:
-                etype_154 = element.Surf154()
-
-                etype_154.midside_nodes = "INCLUDE"
+            # If surface is already exist, use is. If not, create new one.
+            surf = self.model._get_surface(nset, "SURFACE ELEMENTS")
+            if not surf:
+                # Element Type Selection::
+                if kwargs and kwargs["element_type"]:
+                    # Possible Types:
+                    if kwargs["element_type"] == "Surf154":
+                        surface_element = element.Surf154()
+                    elif kwargs["element_type"] == "Surf153":
+                        surface_element = element.Surf153()
+                    elif kwargs["element_type"] == "Surf156":
+                        surface_element = element.Surf156()
+                    elif kwargs["element_type"] == "Surf159":
+                        surface_element = element.Surf159()
+                    elif kwargs["element_type"] == "Follw201":
+                        surface_element = element.Follw201()
+                    else: surface_element = element.Surf154() # Default
+                else:
+                    surface_element = element.Surf154() # Default
 
                 if loaded_area == "INITIAL":
-                    etype_154.large_deflection_area = "ORIGINAL AREA"
+                    surface_element.large_deflection_area = "ORIGINAL AREA"
                 else:
-                    etype_154.large_deflection_area = "USE NEW AREA"
+                    surface_element.large_deflection_area = "USE NEW AREA"
 
-                csys : CoordinateSystem
+                surface_element.midside_nodes = "INCLUDE"
+
                 if direction in ("X", "Y", "Z"):
-
-                    etype_154.pressure_cs = "LOCAL CS"
-
+                    surface_element.pressure_cs = "LOCAL CS"
                     if coordinate_system:
                         csys = coordinate_system
                     else:
                         csys = self.model.add_coordinate_system(show_in_model_tree=False)
+                else:
+                    surface_element.pressure_cs = "ELEMENT CS"
+                    csys = None
 
                 real = attributes.Real(ignore_at_execution=True) # Create empty attribute
                 mat = attributes.Mat(ignore_at_execution=True) # Create empty attribute
-                
                 surf = self.model._add_surface(nset=nset,  
-                                               surface_type=applied_by,
-                                               etype=etype_154,
+                                               surface_type="SURFACE ELEMENTS",
+                                               etype=surface_element,
                                                real_constants=real,
                                                material=mat,
-                                               coordinate_system=csys)
-
-            pressure = Pressure(set=surf, 
-                                value=value, 
-                                csys=csys,
-                                direction=direction,
-                                applied_by=applied_by, 
-                                operation=operation, 
-                                loaded_area=loaded_area) # defined in element type
-
-        self.pressures.append(pressure)
+                                               coordinate_system=csys)    
+            else: csys = surf.csys
+       
+            pressure = Pressure(surf, value, direction, csys, applied_by, operation, loaded_area)
+            self.pressures.append(pressure)
         
     def displacement(self, nset : str, 
-                     value : float = 0,
+                     value : float | None = None,
                      direction : Literal["ALL", "X", "Y", "Z", "RX", "RY", "RZ"] = "ALL", 
                      local_cs : CoordinateSystem | None = None,
                      operation : Literal["ADD", "NEW", "DELETE"] = "NEW",
@@ -502,12 +502,39 @@ class OutputControls:
 class IterationMonitoring:
     """
     NLDIAG,Label,Key,MAXFILE
+
     Sets nonlinear diagnostics functionality
     writes iteration outputs (residuals, contact etc) to the files.
+
+    Labels:
+    NRRE :: Store the Newton-Raphson residuals information.
+    EFLG :: Identify or display elements or nodes that violate the criteria.
+    CONT :: Write contact information to a single Jobname.cnd diagnostic text file during solution.
+ 
+    Diagnostic function characteristics:
+    OFF or 0
+    Suppresses writing of diagnostic information (default).
+    ON or 1
+    Writes diagnostic information to the Jobname.ndxxx, Jobname.nrxxx, or Jobname.cnd
+    file. (If Label = CONT, this option is the same as the SUBS option described below.)
+    ITER
+    Writes contact diagnostic information at each iteration. Valid only when Label = CONT.
+    SUBS
+    Writes contact diagnostic information at each substep. Valid only when Label = CONT.
+    LSTP
+    Writes contact diagnostic information at each load step. Valid only when Label = CONT.
+    STAT
+    Lists information about the diagnostic files in the current working directory.
+    DEL
+    Deletes all diagnostic files in the current working directory.
     """
     function : Literal["NRRE", "EFLG", "CONT"] = "NRRE"
     characteristics : Literal["OFF", "ON", "ITER", "SUBS", "LSTP", "STAT", "DEL"] = "ON"
     maxfile : int = 4
+
+"""# Include NLHIST
+The NLHIST command is a nonlinear diagnostics tool that enables you to monitor diagnostics results
+of interest in real time during a solution."""
 
 
 

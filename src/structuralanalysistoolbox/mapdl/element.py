@@ -194,13 +194,28 @@ class Plane183(Etype):
         return super().__repr__()
     
 ##################################
-### Surface Effect Elements
+### Structural Load Element Types
 ##################################
 
 @dataclass
 class Surf153(Etype):
     """2-D Structural Surface Effect"""
     name : str = "SURF153"
+    pass
+
+@dataclass
+class Surf156(Etype):
+    name : str = "SURF156"
+    pass
+
+@dataclass
+class Surf159(Etype):
+    name : str = "SURF159"
+    pass
+
+@dataclass
+class Follw201(Etype):
+    name : str = "Follw201"
     pass
 
 #####################
